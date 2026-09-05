@@ -1,0 +1,81 @@
+<Window x:Class="SqlHelper.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="SqlHelper" Height="900" Width="1500" MinHeight="640" MinWidth="1080"
+        WindowStartupLocation="CenterScreen" WindowState="Maximized">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="228"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Navigation -->
+        <Border Grid.Row="0" Grid.Column="0" Background="{StaticResource SurfaceBrush}"
+                BorderBrush="{StaticResource BorderSoftBrush}" BorderThickness="0,0,1,0">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Top" Margin="16,20,16,18">
+                    <TextBlock Text="SqlHelper" FontSize="19" FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding RegistrySummary}" Style="{StaticResource MutedText}" Margin="0,3,0,0"
+                               TextWrapping="Wrap"/>
+                </StackPanel>
+
+                <StackPanel DockPanel.Dock="Top">
+                    <RadioButton GroupName="Nav" Style="{StaticResource NavButton}"
+                                 AutomationProperties.AutomationId="NavRegistry" IsChecked="{Binding IsRegistryActive, Mode=OneWay}" Command="{Binding ShowRegistryCommand}">
+                        <StackPanel>
+                            <TextBlock Text="Databases"/>
+                            <TextBlock Text="Register your client databases" Style="{StaticResource FaintText}"/>
+                        </StackPanel>
+                    </RadioButton>
+                    <RadioButton GroupName="Nav" Style="{StaticResource NavButton}"
+                                 AutomationProperties.AutomationId="NavSelect" IsChecked="{Binding IsSelectActive, Mode=OneWay}" Command="{Binding ShowSelectCommand}">
+                        <StackPanel>
+                            <TextBlock Text="Select Query"/>
+                            <TextBlock Text="Read-only, results per client" Style="{StaticResource FaintText}"/>
+                        </StackPanel>
+                    </RadioButton>
+                    <RadioButton GroupName="Nav" Style="{StaticResource NavButton}"
+                                 AutomationProperties.AutomationId="NavNonQuery" IsChecked="{Binding IsNonQueryActive, Mode=OneWay}" Command="{Binding ShowNonQueryCommand}">
+                        <StackPanel>
+                            <TextBlock Text="Update / Delete"/>
+                            <TextBlock Text="Dry run, then commit" Style="{StaticResource FaintText}"/>
+                        </StackPanel>
+                    </RadioButton>
+                    <RadioButton GroupName="Nav" Style="{StaticResource NavButton}"
+                                 AutomationProperties.AutomationId="NavDeploy" IsChecked="{Binding IsDeployActive, Mode=OneWay}" Command="{Binding ShowDeployCommand}">
+                        <StackPanel>
+                            <TextBlock Text="Deploy Object"/>
+                            <TextBlock Text="Procedures, functions, views" Style="{StaticResource FaintText}"/>
+                        </StackPanel>
+                    </RadioButton>
+                    <RadioButton GroupName="Nav" Style="{StaticResource NavButton}"
+                                 AutomationProperties.AutomationId="NavPatch" IsChecked="{Binding IsPatchActive, Mode=OneWay}" Command="{Binding ShowPatchCommand}">
+                        <StackPanel>
+                            <TextBlock Text="Patch Divergent Copies"/>
+                            <TextBlock Text="When clients have drifted apart" Style="{StaticResource FaintText}"/>
+                        </StackPanel>
+                    </RadioButton>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- Active screen -->
+        <ContentControl Grid.Row="0" Grid.Column="1" Content="{Binding CurrentView}" Margin="22,20,22,14"/>
+
+        <!-- Status bar -->
+        <Border Grid.Row="1" Grid.ColumnSpan="2" Background="{StaticResource SurfaceBrush}"
+                BorderBrush="{StaticResource BorderSoftBrush}" BorderThickness="0,1,0,0" Padding="16,7">
+            <DockPanel>
+                <TextBlock Text="{Binding VersionLine}" Style="{StaticResource FaintText}" DockPanel.Dock="Left"/>
+                <TextBlock Style="{StaticResource FaintText}" DockPanel.Dock="Right" HorizontalAlignment="Right">
+                    <Run Text="Everything stays on this PC ·"/><Run Text=" "/><Run Text="{Binding OperatorLine, Mode=OneWay}"/>
+                </TextBlock>
+                <TextBlock/>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

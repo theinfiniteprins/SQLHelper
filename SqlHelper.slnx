@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SqlHelper.App/SqlHelper.App.csproj" />
+    <Project Path="src/SqlHelper.Core/SqlHelper.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SqlHelper.App.Tests/SqlHelper.App.Tests.csproj" />
+    <Project Path="tests/SqlHelper.Core.Tests/SqlHelper.Core.Tests.csproj" />
+    <Project Path="tests/SqlHelper.Integration.Tests/SqlHelper.Integration.Tests.csproj" />
+  </Folder>
+</Solution>

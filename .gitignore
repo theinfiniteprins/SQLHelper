@@ -1,0 +1,34 @@
+# Build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+*.user
+*.suo
+.vs/
+
+# Test / coverage
+[Tt]est[Rr]esults/
+*.coverage
+*.trx
+
+# Rider / VS Code
+.idea/
+.vscode/
+
+# Local developer configuration & secrets — never commit
+appsettings.*.local.json
+*.local.json
+secrets/
+*.pfx
+*.snk
+
+# The tool's own runtime data (kept only on the operator's machine)
+/artifacts-local/
+DeploymentBackups/
+*.sqlhelper.dat
+
+# Local integration-test connection override
+tests/**/integration.runsettings.local

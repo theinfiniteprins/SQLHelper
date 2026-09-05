@@ -1,0 +1,121 @@
+<UserControl x:Class="SqlHelper.App.Views.DeployObjectView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:SqlHelper.App.ViewModels"
+             xmlns:controls="clr-namespace:SqlHelper.App.Controls"
+             d:DataContext="{d:DesignInstance vm:DeployObjectViewModel}"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008/design" mc:Ignorable="d"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="14"/>
+            <ColumnDefinition Width="290"/>
+        </Grid.ColumnDefinitions>
+
+        <DockPanel Grid.Column="0">
+            <StackPanel DockPanel.Dock="Top">
+                <TextBlock Text="Deploy Object" Style="{StaticResource PageTitle}"/>
+                <TextBlock Style="{StaticResource PageSubtitle}">
+                    Push one stored procedure, function, view or trigger to every selected client — replacing whatever
+                    each one currently has. Use this when all clients should end up with the identical definition. If they
+                    have drifted apart and you only want to change a few lines, use Patch Divergent Copies instead.
+                </TextBlock>
+            </StackPanel>
+
+            <!-- How it works -->
+            <Border DockPanel.Dock="Top" Style="{StaticResource InfoBanner}" Margin="0,0,0,12">
+                <StackPanel>
+                    <TextBlock Text="What happens when you press Deploy" FontWeight="SemiBold"
+                               Foreground="{StaticResource AccentPressedBrush}" Margin="0,0,0,6"/>
+                    <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Foreground="{StaticResource AccentPressedBrush}">
+                        1. Each client's current definition is read and written to a timestamped backup folder.<LineBreak/>
+                        2. A rollback script that restores that exact version is generated per client.<LineBreak/>
+                        3. Your script runs as CREATE OR ALTER inside a transaction, keeping existing permissions.<LineBreak/>
+                        4. The definition is read back to confirm it landed, and a manifest records before/after checksums.
+                    </TextBlock>
+                </StackPanel>
+            </Border>
+
+            <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Margin="0,0,0,12">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="2*"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Description (optional)" Style="{StaticResource FieldLabel}"/>
+                            <TextBox Text="{Binding ChangeTitle, UpdateSourceTrigger=PropertyChanged}"/>
+                            <TextBlock Style="{StaticResource FieldHint}"
+                                       Text="Optional. Backups are named for the object and the time, so this is only a note for the audit log."/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Ticket (optional)" Style="{StaticResource FieldLabel}"/>
+                            <TextBox Text="{Binding Ticket, UpdateSourceTrigger=PropertyChanged}"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <TextBlock Text="Backups are written to" Style="{StaticResource FieldLabel}" Margin="0,14,0,3"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox Grid.Column="0" Text="{Binding BackupRoot, UpdateSourceTrigger=PropertyChanged}"/>
+                        <Button Grid.Column="1" Content="Browse…" Margin="8,0,0,0" Command="{Binding BrowseBackupRootCommand}"/>
+                        <Button Grid.Column="2" Content="Open last" Margin="8,0,0,0" Command="{Binding OpenBackupFolderCommand}"/>
+                    </Grid>
+
+                    <TextBlock Text="Definition to deploy" Style="{StaticResource FieldLabel}" Margin="0,14,0,3"/>
+                    <TextBox Style="{StaticResource CodeBox}" Height="210"
+                             Text="{Binding DefinitionScript, UpdateSourceTrigger=PropertyChanged}"/>
+                    <TextBlock Style="{StaticResource FieldHint}" TextWrapping="Wrap">
+                        Paste the whole thing, exactly as SSMS scripts it — CREATE, ALTER or CREATE OR ALTER all work, and a
+                        USE / SET / GO preamble is fine, it is stripped for you. One object per deployment; the object name is
+                        read from the script itself.
+                    </TextBlock>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                        <Button Content="Deploy" Style="{StaticResource PrimaryButton}" MinWidth="110"
+                                Command="{Binding DeployCommand}"
+                                IsEnabled="{Binding IsRunning, Converter={StaticResource InverseBoolConverter}}"/>
+                        <TextBlock Text="{Binding StatusMessage}" Style="{StaticResource MutedText}" VerticalAlignment="Center"
+                                   Margin="14,0,0,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}" Padding="12">
+                <Grid>
+                    <DataGrid ItemsSource="{Binding Results}" IsReadOnly="True" AutoGenerateColumns="False"
+                              Visibility="{Binding Results.Count, Converter={StaticResource CountToVisibilityConverter}}">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Client" Binding="{Binding ClientName}" Width="170"/>
+                            <DataGridTextColumn Header="Result" Binding="{Binding Status}" Width="110"/>
+                            <DataGridTextColumn Header="Method" Binding="{Binding Method}" Width="100"/>
+                            <DataGridTextColumn Header="Before" Binding="{Binding BeforeHash}" Width="80"
+                                                FontFamily="{StaticResource MonoFont}"/>
+                            <DataGridTextColumn Header="After" Binding="{Binding AfterHash}" Width="80"
+                                                FontFamily="{StaticResource MonoFont}"/>
+                            <DataGridTextColumn Header="Signature changes" Binding="{Binding SignatureChangeCount}" Width="120"/>
+                            <DataGridTextColumn Header="Error" Binding="{Binding Error}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"
+                                Visibility="{Binding Results.Count, Converter={StaticResource ZeroCountToVisibilityConverter}}">
+                        <TextBlock Text="Nothing deployed yet" FontWeight="SemiBold" HorizontalAlignment="Center"
+                                   Foreground="{StaticResource InkMutedBrush}"/>
+                        <TextBlock Style="{StaticResource FieldHint}" TextAlignment="Center" Margin="0,6,0,0" MaxWidth="420"
+                                   Text="Results appear here per client, with the checksum before and after so you can see the change actually landed."/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </DockPanel>
+
+        <controls:TargetPickerControl Grid.Column="2" DataContext="{Binding Picker}"/>
+    </Grid>
+</UserControl>

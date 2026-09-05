@@ -1,0 +1,11 @@
+# Windows shells parse these byte-for-byte: a .cmd file with LF endings makes
+# cmd.exe drop the first character of every line, and PowerShell 5.1 mis-reads
+# non-ASCII bytes in a file without a BOM. Keep both CRLF, always.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+*.cs   text eol=crlf
+*.xaml text eol=crlf
+*.csproj text eol=crlf
+*.slnx text eol=crlf

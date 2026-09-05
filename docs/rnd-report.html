@@ -1,0 +1,739 @@
+<title>Multi-Database Runner Feasibility</title>
+<meta name="description" content="R&D findings for a local-only tool that runs queries and deploys programmable objects across 30+ identical client databases.">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@400;500;600&family=IBM+Plex+Sans:wght@400;450;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #f4f6f3;
+    --surface: #ffffff;
+    --sunk: #ebefe9;
+    --ink: #191d1b;
+    --ink-muted: #55605a;
+    --hairline: #d6dcd4;
+    --accent: #1f6b57;
+    --accent-soft: #e2efe9;
+    --warn: #8f5717;
+    --warn-soft: #f4e8d8;
+    --crit: #97332f;
+    --crit-soft: #f1dedc;
+    --shadow: 0 1px 2px rgba(20, 35, 30, .06), 0 8px 24px rgba(20, 35, 30, .05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111512;
+      --surface: #181d19;
+      --sunk: #0d100e;
+      --ink: #e5e9e3;
+      --ink-muted: #99a69c;
+      --hairline: #2a312c;
+      --accent: #5fc0a3;
+      --accent-soft: #16241e;
+      --warn: #d89f63;
+      --warn-soft: #271f13;
+      --crit: #dc8f87;
+      --crit-soft: #281614;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px rgba(0, 0, 0, .35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111512;
+    --surface: #181d19;
+    --sunk: #0d100e;
+    --ink: #e5e9e3;
+    --ink-muted: #99a69c;
+    --hairline: #2a312c;
+    --accent: #5fc0a3;
+    --accent-soft: #16241e;
+    --warn: #d89f63;
+    --warn-soft: #271f13;
+    --crit: #dc8f87;
+    --crit-soft: #281614;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px rgba(0, 0, 0, .35);
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    font-weight: 400;
+    line-height: 1.62;
+    margin: 0;
+    font-feature-settings: "ss01";
+  }
+  .wrap {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 clamp(20px, 5vw, 64px);
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  @media (min-width: 1120px) {
+    .wrap { grid-template-columns: 200px minmax(0, 1fr); column-gap: 56px; }
+    .toc { display: block; }
+  }
+
+  /* ---- table of contents rail ---- */
+  .toc { display: none; align-self: start; position: sticky; top: 0; padding-top: 96px; }
+  .toc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+  .toc a {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11.5px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    text-decoration: none;
+    line-height: 1.4;
+    display: block;
+  }
+  .toc a:hover { color: var(--accent); }
+
+  main { min-width: 0; padding-bottom: 120px; }
+
+  /* ---- masthead ---- */
+  header { padding: 96px 0 44px; border-bottom: 1px solid var(--hairline); }
+  .kicker {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 20px;
+  }
+  h1 {
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-weight: 500;
+    font-size: clamp(30px, 4.6vw, 46px);
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    margin: 0 0 22px;
+  }
+  .standfirst {
+    font-size: clamp(16px, 2vw, 18.5px);
+    color: var(--ink-muted);
+    max-width: 60ch;
+    margin: 0;
+  }
+  .meta {
+    margin-top: 28px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 26px;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px;
+    color: var(--ink-muted);
+    letter-spacing: .02em;
+  }
+
+  section { padding: 52px 0; border-bottom: 1px solid var(--hairline); }
+  section:last-child { border-bottom: 0; }
+  .sec-label {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11.5px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    margin: 0 0 14px;
+  }
+  h2 {
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-weight: 500;
+    font-size: clamp(21px, 2.8vw, 27px);
+    line-height: 1.22;
+    letter-spacing: -0.005em;
+    text-wrap: balance;
+    margin: 0 0 18px;
+  }
+  h3 {
+    font-family: "IBM Plex Sans", sans-serif;
+    font-weight: 600;
+    font-size: 16.5px;
+    margin: 26px 0 8px;
+    letter-spacing: -0.005em;
+  }
+  p { max-width: 66ch; margin: 0 0 15px; }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  strong { font-weight: 600; }
+  code {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .88em;
+    background: var(--sunk);
+    padding: 1px 5px;
+    border-radius: 3px;
+    border: 1px solid var(--hairline);
+  }
+  ul { max-width: 66ch; margin: 0 0 15px; padding-left: 20px; }
+  li { margin-bottom: 7px; }
+  li::marker { color: var(--accent); }
+
+  /* ---- verdict summary ---- */
+  .verdicts { display: grid; gap: 12px; margin: 8px 0 4px; }
+  @media (min-width: 620px) { .verdicts { grid-template-columns: 1fr 1fr; } }
+  .vrow {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 12px;
+    align-items: baseline;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-left: 3px solid var(--tone, var(--accent));
+    padding: 13px 16px;
+    border-radius: 4px;
+  }
+  .vrow b { font-weight: 600; font-size: 14.5px; display: block; }
+  .vrow span { color: var(--ink-muted); font-size: 13px; }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    border-radius: 100px;
+    white-space: nowrap;
+    border: 1px solid;
+  }
+  .chip.ok  { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+  .chip.mid { color: var(--warn);   background: var(--warn-soft);   border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+  .chip.no  { color: var(--crit);   background: var(--crit-soft);   border-color: color-mix(in srgb, var(--crit) 35%, transparent); }
+
+  /* ---- feature blocks ---- */
+  .feature { margin-top: 30px; }
+  .feature:first-of-type { margin-top: 16px; }
+  .feature-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 6px; }
+  .feature-head h3 { margin: 0; font-size: 17px; }
+
+  /* ---- callouts ---- */
+  .note {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 5px;
+    padding: 18px 20px;
+    margin: 22px 0;
+    box-shadow: var(--shadow);
+  }
+  .note.warn { border-color: color-mix(in srgb, var(--warn) 40%, var(--hairline)); background: color-mix(in srgb, var(--warn-soft) 55%, var(--surface)); }
+  .note .note-label {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    display: block;
+    margin-bottom: 8px;
+  }
+  .note.warn .note-label { color: var(--warn); }
+  .note p:last-child, .note ul:last-child { margin-bottom: 0; }
+
+  pre {
+    background: var(--sunk);
+    border: 1px solid var(--hairline);
+    border-radius: 5px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12.5px;
+    line-height: 1.65;
+    margin: 20px 0;
+    color: var(--ink);
+  }
+  pre .c { color: var(--ink-muted); }
+
+  /* ---- roadmap ---- */
+  .phase { display: grid; grid-template-columns: auto 1fr; gap: 18px; padding: 16px 0; border-top: 1px solid var(--hairline); }
+  .phase:first-of-type { border-top: 0; }
+  .phase .n {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px;
+    color: var(--accent);
+    letter-spacing: .06em;
+    padding-top: 2px;
+    white-space: nowrap;
+  }
+  .phase h3 { margin: 0 0 4px; }
+  .phase p { margin: 0; font-size: 14px; color: var(--ink-muted); }
+  .phase .est { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-muted); }
+
+  .toggle {
+    position: fixed; top: 16px; right: 16px; z-index: 10;
+    font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .05em;
+    background: var(--surface); color: var(--ink-muted);
+    border: 1px solid var(--hairline); border-radius: 100px;
+    padding: 6px 12px; cursor: pointer;
+  }
+  .toggle:hover { color: var(--accent); border-color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    html { scroll-behavior: smooth; }
+  }
+</style>
+
+<button class="toggle" id="themeToggle" aria-label="Toggle colour theme">◑ theme</button>
+
+<div class="wrap">
+  <nav class="toc" aria-label="Contents">
+    <ol>
+      <li><a href="#verdict">Verdict</a></li>
+      <li><a href="#features">Feature feasibility</a></li>
+      <li><a href="#security">Local-only security model</a></li>
+      <li><a href="#objects">Programmable-object engine</a></li>
+      <li><a href="#patching">Patching divergent copies</a></li>
+      <li><a href="#limits">Hard limits</a></li>
+      <li><a href="#stack">Stack &amp; build-vs-buy</a></li>
+      <li><a href="#roadmap">Roadmap</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <header>
+      <p class="kicker">Internal R&amp;D — Feasibility Report</p>
+      <h1>Running one fix across thirty identical client databases</h1>
+      <p class="standfirst">
+        Between the bi-monthly releases, every out-of-band fix — a data correction, an altered
+        stored procedure — is applied by hand in SSMS, database by database. This report assesses a
+        local-only tool that fans one statement out to a chosen set of client databases, and reports
+        which parts are achievable, which carry caveats, and which are not.
+      </p>
+      <div class="meta">
+        <span>2026-09-04</span>
+        <span>Scope: 30+ databases · identical schema · SQL Server</span>
+        <span>Status: research, no build</span>
+      </div>
+    </header>
+
+    <section id="verdict">
+      <p class="sec-label">Bottom line</p>
+      <h2>Effectively all of it is achievable, and the hardest requirement is the safest to build</h2>
+      <p>
+        Nothing in the request needs technology that does not already exist as a documented,
+        offline-capable library. The programmable-object workflow — capture the current definition,
+        file it, then run the <code>ALTER</code> — is not only feasible, it is the cleanest piece to
+        build well, because module DDL in SQL Server is transactional and every "before" state is a
+        plain text definition you can read with one query.
+      </p>
+      <p>
+        The harder refinement you raised later — changing a few lines inside each client's
+        <em>own</em> copy of a procedure when those copies have drifted apart — is also buildable. It
+        works by clustering the clients into their handful of distinct versions and patching against
+        an anchor in the text rather than replacing the file. That is its own section below.
+      </p>
+      <div class="verdicts">
+        <div class="vrow" style="--tone: var(--accent);">
+          <span class="chip ok">✓ Achievable</span>
+          <span><b>Database registry</b>Grid entry, paste-from-Excel, encrypted local store.</span>
+        </div>
+        <div class="vrow" style="--tone: var(--accent);">
+          <span class="chip ok">✓ Achievable</span>
+          <span><b>SELECT runner</b>Client-wise results, Excel export, read-only enforced three ways.</span>
+        </div>
+        <div class="vrow" style="--tone: var(--warn);">
+          <span class="chip mid">△ With caveats</span>
+          <span><b>Update / Delete runner</b>Per-DB row counts yes; one atomic transaction across all servers, no.</span>
+        </div>
+        <div class="vrow" style="--tone: var(--accent);">
+          <span class="chip ok">✓ Achievable</span>
+          <span><b>Auto-backup object deploy</b>Timestamped folder, one file per object, then the change — with rollback for free.</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="features">
+      <p class="sec-label">Feature feasibility</p>
+      <h2>Screen by screen</h2>
+
+      <div class="feature">
+        <div class="feature-head">
+          <h3>1 · Database registry</h3>
+          <span class="chip ok">✓ Achievable</span>
+        </div>
+        <p>
+          An editable grid (one row per database: server, database name, login, password, plus an
+          <em>environment</em> tag and a free-text <em>client name</em>). Support pasting a block
+          straight from Excel — the clipboard delivers it as tab-separated text — and importing a
+          <code>.xlsx</code> with <a href="https://github.com/ClosedXML/ClosedXML">ClosedXML</a>, which
+          needs no Office install. The list is saved to one encrypted file under <code>%APPDATA%</code>,
+          never beside the executable and never in source control.
+        </p>
+        <p>
+          Add <strong>named target groups</strong> here ("All production", "EU clients", "Pilot") so
+          later screens select a group instead of ticking boxes each time.
+        </p>
+      </div>
+
+      <div class="feature">
+        <div class="feature-head">
+          <h3>2 · SELECT runner</h3>
+          <span class="chip ok">✓ Achievable</span>
+        </div>
+        <p>Read-only is enforced in depth, because no text check alone is trustworthy:</p>
+        <ul>
+          <li><strong>Parse, don't regex.</strong> <code>Microsoft.SqlServer.TransactSql.ScriptDom</code>
+            is Microsoft's own T-SQL parser. Walk the syntax tree and reject anything that is not a
+            <code>SELECT</code> — it catches <code>EXEC</code>, <code>UPDATE … OUTPUT</code>, and a
+            CTE that ends in <code>INSERT</code>, all of which a keyword filter misses.</li>
+          <li><strong>Wrap every run</strong> in a transaction that is always rolled back.</li>
+          <li><strong>Best of all,</strong> give this screen a login that only holds
+            <code>db_datareader</code>. Enforced by the server, nothing to trust in the client.</li>
+        </ul>
+        <p>
+          Queries fan out in parallel with a small concurrency cap (<code>SemaphoreSlim</code>, 4–8 at
+          once), each with its own timeout and a global cancel. Results show as one grid per client
+          plus a combined grid with a leading <code>Client</code> column; export writes an
+          <code>.xlsx</code> with either a sheet per client or one stacked sheet.
+        </p>
+      </div>
+
+      <div class="feature">
+        <div class="feature-head">
+          <h3>3 · Update / Delete runner</h3>
+          <span class="chip mid">△ Achievable, with caveats</span>
+        </div>
+        <p>
+          Row counts per database come straight from <code>@@ROWCOUNT</code> /
+          <code>ExecuteNonQuery</code>. The important addition is a <strong>dry run</strong>: execute
+          inside a transaction, capture the count, <code>ROLLBACK</code>, and show "would affect N
+          rows" for every target <em>before</em> anything commits. Then run for real, each database in
+          its own transaction, with a "stop on first error" / "continue" choice and a
+          <strong>re-run failed only</strong> action afterwards.
+        </p>
+        <p>Guardrails worth making mandatory: a warning when an <code>UPDATE</code>/<code>DELETE</code>
+          has no <code>WHERE</code>; a confirmation when the row count crosses a threshold; a typed
+          confirmation for anything tagged production; and a required change title or ticket reference
+          recorded with every write.</p>
+      </div>
+
+      <div class="feature">
+        <div class="feature-head">
+          <h3>4 · Programmable-object deployment</h3>
+          <span class="chip ok">✓ Achievable</span>
+        </div>
+        <p>
+          Stored procedures, table-valued and scalar functions, views, triggers. This is the special
+          requirement and it gets its own section below.
+        </p>
+      </div>
+    </section>
+
+    <section id="security">
+      <p class="sec-label">The "nothing leaves the machine" requirement</p>
+      <h2>What local-only actually means, and how to prove it</h2>
+
+      <h3>Credentials at rest</h3>
+      <ul>
+        <li><strong>Best case — store no passwords at all.</strong> Where the SQL Servers are reachable
+          through domain trust, use Windows Authentication (<code>Integrated Security=true</code>). The
+          registry then holds no secrets.</li>
+        <li><strong>Otherwise — DPAPI.</strong> <code>ProtectedData.Protect(…, DataProtectionScope.CurrentUser)</code>
+          encrypts each password with a key derived from the Windows account on that machine. The
+          ciphertext is useless copied to another user or another PC, and there is no key file to
+          manage.</li>
+        <li><strong>Optional master password</strong> on launch: derive entropy with Argon2id and pass
+          it to DPAPI as <code>optionalEntropy</code>, so the store cannot be read even by the same
+          Windows user without the passphrase.</li>
+        <li>Connections use <code>Encrypt=True</code> so traffic to SQL Server is TLS-protected;
+          install proper server certificates rather than setting <code>TrustServerCertificate=True</code>.</li>
+      </ul>
+
+      <h3>No egress</h3>
+      <p>
+        The application makes <strong>no outbound connection except to the registered SQL Servers</strong>
+        on their configured port. No telemetry, no auto-update check, no crash reporting, no licence
+        activation. This is verifiable, not just asserted:
+      </p>
+      <ul>
+        <li>Ship a single self-contained, <strong>code-signed</strong> executable so IT can allowlist it.</li>
+        <li>A host firewall rule that permits only TCP 1433 to the known server subnet will not
+          interfere with the tool — and will block anything else it might try.</li>
+        <li>Pin and review every NuGet dependency version; build offline if policy requires it.</li>
+      </ul>
+    </section>
+
+    <section id="objects">
+      <p class="sec-label">Deep dive</p>
+      <h2>The programmable-object engine</h2>
+      <p>For each selected database, and each target object, the tool runs five steps:</p>
+      <ul>
+        <li><strong>Read the current definition</strong> —
+          <code>OBJECT_DEFINITION(OBJECT_ID(N'dbo.usp_GetOrders'))</code> or
+          <code>sys.sql_modules</code>. For a richer script (SET options, permissions), SMO's
+          <code>Scripter</code>.</li>
+        <li><strong>Write the backup file</strong> before touching anything (layout below). An object
+          that does not yet exist gets a marker file recording that it was new.</li>
+        <li><strong>Execute the change.</strong> Prefer <code>CREATE OR ALTER</code> (SQL Server 2016
+          SP1+). Split the script on <code>GO</code> first — <code>GO</code> is an SSMS convention that
+          ADO.NET does not understand; ScriptDom or SMO handles the batching. Module DDL is
+          transactional, so wrap it and roll back on error.</li>
+        <li><strong>Verify</strong> — re-read the definition and record its checksum.</li>
+        <li><strong>Log</strong> the result to the audit trail.</li>
+      </ul>
+
+      <pre><span class="c">DeploymentBackups\</span>
+  2026-09-04_14-30-05__ORD-1487-fix-tax-rounding\
+    _manifest.json          <span class="c">— targets, operator, before/after checksums, per-DB result</span>
+    Acme-Retail\
+      dbo.usp_GetOrders.sql
+      dbo.fn_CalcTax.sql
+    Northwind-Trading\
+      dbo.usp_GetOrders.sql
+    _rollback\
+      rollback__Acme-Retail.sql      <span class="c">— re-applies the captured definitions</span>
+      rollback__Northwind-Trading.sql</pre>
+      <p>
+        Each file opens with a header comment: server, database, object, capture time, checksum, tool
+        version, operator.
+      </p>
+
+      <div class="note">
+        <span class="note-label">Because the "before" state is captured, four things come almost for free</span>
+        <ul>
+          <li><strong>One-click rollback.</strong> The captured definitions <em>are</em> the revert
+            script; generate and keep it per database.</li>
+          <li><strong>Pre-flight diff.</strong> Show current-vs-new per database before running — this
+            is how you catch a client that has a hand-customised version of the procedure before you
+            overwrite it.</li>
+          <li><strong>Drift report.</strong> Hash each target object across all 30 databases and flag
+            the ones that differ from a chosen reference. Answers "is every client actually on the
+            same code?"</li>
+          <li><strong>Skip-if-identical.</strong> If a database already has the new definition, log
+            "already current" and move on.</li>
+        </ul>
+      </div>
+      <p>
+        Point the backup folder at a local Git repository and auto-commit each run: full history,
+        diff and blame, still entirely on the machine.
+      </p>
+    </section>
+
+    <section id="patching">
+      <p class="sec-label">Deep dive — the harder case</p>
+      <h2>Changing a few lines when every client's copy is different</h2>
+      <p>
+        A blanket "deploy this definition everywhere" is wrong once clients have drifted. One client's
+        procedure may take different parameters or carry extra logic, so overwriting it with the
+        canonical version breaks that client's callers or throws on deploy. What you want instead is
+        to change the same <strong>2–3 lines inside whatever each client currently has</strong>, and
+        leave the rest of their copy alone.
+      </p>
+
+      <h3>The insight that makes it manageable</h3>
+      <p>
+        Clients do not drift into 30 unique versions — they cluster into a handful. The tool hashes
+        the normalised definition of the target object across every selected client and groups them,
+        then reports something like: <em>"24 clients on canonical, 4 on variant B, 2 on variant C."</em>
+        You author the change once per variant, not once per client. The worst case is the number of
+        distinct versions, not the number of clients.
+      </p>
+
+      <h3>A progressive apply strategy</h3>
+      <p>
+        The change is stored as a <strong>patch</strong> — an anchor plus a replacement — never as a
+        whole file. For each client it is tried in tiers, stopping at the first that succeeds:
+      </p>
+      <div class="verdicts">
+        <div class="vrow" style="--tone: var(--accent);">
+          <span class="chip ok">Tier 1 · exact</span>
+          <span><b>Anchored replace</b>The old lines plus auto-expanded surrounding context, matched with whitespace normalised. Found exactly once in the procedure → replace.</span>
+        </div>
+        <div class="vrow" style="--tone: var(--warn);">
+          <span class="chip mid">Tier 2 · fuzzy</span>
+          <span><b>Tolerant match</b>If the exact anchor fails, match with tolerance for shifted or lightly edited context (diff-match-patch <code>patch_apply</code>). Applied, but flagged with its offset for a human to eyeball.</span>
+        </div>
+        <div class="vrow" style="--tone: var(--crit);">
+          <span class="chip no">Tier 3 · manual</span>
+          <span><b>Focused merge editor</b>If the target region itself is customised, the tool opens a two-pane editor for that one client with your intended change highlighted. You make the edit by hand; the tool records "Client X handled manually for change ORD-1487".</span>
+        </div>
+      </div>
+      <p>
+        Every tier ends the same way: re-parse the result with ScriptDom and reject anything that is
+        not valid T-SQL; check the change size is sane (a 3-line patch that produces 40 changed lines
+        is aborted); and show the resulting unified diff for approval.
+      </p>
+
+      <h3>Pre-flight — your "it throws an error" concern</h3>
+      <p>
+        Before any patch, build a <strong>signature</strong> for the target object on every client
+        from <code>sys.parameters</code>: parameter names, types, order, defaults, output flags — and
+        result shape for table-valued functions. Compare each client to canonical and flag every one
+        whose signature differs. Those are exactly the clients where a wrong move breaks callers, and
+        the ones most likely to fall to Tier 3. This runs as a gate — you see it before committing to
+        anything.
+      </p>
+
+      <h3>Per-client dry run, then the normal pipeline</h3>
+      <p>
+        A grid before anything is written: <em>client · current variant · apply tier · resulting diff
+        · signature match · approve</em>. Approve the clean cohort in bulk; handle or defer the
+        flagged clients one at a time. Once approved, it is the same pipeline as an ordinary deploy —
+        back up each client's <em>actual</em> current definition, apply, re-fetch and confirm the
+        patched lines are present, and generate a per-client rollback from the captured original.
+      </p>
+
+      <div class="note warn">
+        <span class="note-label">What still needs a human</span>
+        <ul>
+          <li>A client whose target region has genuinely been rewritten needs a manual edit. The tool
+            narrows the work to that one client and that one region, but it cannot guess intent.</li>
+          <li>Fuzzy matching can place a change in the wrong spot if the anchor is not unique —
+            mitigated by forcing the anchor to be unique within the procedure (auto-expand context, or
+            else require Tier 3) and by mandatory diff review.</li>
+          <li>If someone is mid-way through their own uncommitted customisation of a client, you will
+            see it as drift with no clean anchor. Correct behaviour — but it means coordinating with
+            whoever owns that client's code.</li>
+        </ul>
+      </div>
+
+      <h3>Building blocks</h3>
+      <ul>
+        <li><a href="https://github.com/google/diff-match-patch">diff-match-patch</a> (C# port) —
+          fuzzy patch application with per-hunk success/failure reporting. The workhorse for Tier 2.</li>
+        <li><strong>ScriptDom</strong> — validate every patched result; also parse-and-re-emit to
+          produce a normalised form for drift hashing, so whitespace and comments do not register as
+          separate variants.</li>
+        <li><a href="https://github.com/mmanela/diffplex">DiffPlex</a> (.NET) — side-by-side diffs
+          for the review screens.</li>
+        <li><code>sys.parameters</code> / <code>sys.sql_modules</code> — profiling and signature
+          extraction.</li>
+        <li><code>git merge-file</code> (ships with Git) — optional true three-way merge, if you keep
+          canonical definitions in version control and therefore have the common ancestor.</li>
+      </ul>
+    </section>
+
+    <section id="limits">
+      <p class="sec-label">Hard limits</p>
+      <h2>What the tool cannot do, however it is built</h2>
+      <div class="note warn">
+        <span class="note-label">Set expectations here</span>
+        <ul>
+          <li><strong>No single atomic transaction across all 30 servers.</strong> That needs
+            distributed transactions (MSDTC) and is fragile at this scale. The honest model is
+            per-database transactions plus the auto-generated rollback scripts plus "re-run failed".</li>
+          <li><strong>"Is this query read-only?" cannot be proven from text alone</strong> — mitigated,
+            not eliminated, by the syntax-tree check plus a reader-only login.</li>
+          <li><strong>No point-in-time data recovery</strong> after a bad <code>UPDATE</code>. That is
+            what SQL Server's native backups are for; the tool can only snapshot the affected rows to
+            a file beforehand.</li>
+          <li><strong>Table and column drift between clients</strong> is detectable but outside the
+            stated scope — a natural later feature.</li>
+          <li><strong>A determined insider</strong> is not stopped by a local tool; the audit trail
+            narrows the risk, it does not remove it.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="stack">
+      <p class="sec-label">Recommendation</p>
+      <h2>Stack, and whether to build at all</h2>
+      <h3>If built in-house</h3>
+      <p>
+        C# / .NET 8 with a WPF (or WinForms) front end. <code>Microsoft.Data.SqlClient</code> for
+        execution, <code>Microsoft.SqlServer.TransactSql.ScriptDom</code> for parsing and
+        <code>GO</code>-splitting, SMO for scripting object definitions, ClosedXML for Excel,
+        <code>ProtectedData</code> for the credential store, and an append-only audit log (SQLite or
+        JSONL: operator, time, targets, full statement, counts, checksums, duration).
+      </p>
+      <h3>Before writing SQL plumbing, look at these</h3>
+      <ul>
+        <li><a href="https://dbatools.io/">dbatools</a> — free, open-source PowerShell.
+          <code>Invoke-DbaQuery</code>, <code>Get-DbaModule</code> and <code>Export-DbaScript</code>
+          already do multi-instance execution and object scripting. The fastest safe way to build the
+          engine; a thin UI can wrap it.</li>
+        <li><a href="https://dbup.readthedocs.io/">DbUp</a> / <a href="https://flywaydb.org/">Flyway</a>
+          — local migration-script runners with per-database version tracking. They solve "run this
+          everywhere, once, in order" but not the ad-hoc SELECT/export or the auto-scripting of the
+          old procedure.</li>
+        <li>Redgate <strong>SQL Multi Script</strong> — commercial; does the multi-database query and
+          export today, but not the backup-then-alter workflow, and is third-party code to vet.</li>
+      </ul>
+      <div class="note">
+        <span class="note-label">Structural option worth weighing</span>
+        <p>
+          The root problem is out-of-band change. If <em>every</em> fix — data corrections included —
+          became a numbered migration script in source control, applied by a runner that tracks a
+          <code>SchemaVersions</code> row per database, then "did I run this on client 17?" stops being
+          a question. The tool then mainly needs target selection, a "show pending / apply" screen,
+          and the SELECT utility — with your bespoke backup step layered on the object migrations.
+        </p>
+      </div>
+      <p>
+        <strong>Verdict:</strong> the specific combination — ad-hoc client-wise SELECT with export
+        <em>and</em> the auto-backup deployment engine — is niche enough to justify a small internal
+        tool. Build its core on dbatools or the Microsoft libraries; do not hand-roll the SQL
+        internals.
+      </p>
+    </section>
+
+    <section id="roadmap">
+      <p class="sec-label">Roadmap</p>
+      <h2>Suggested build order</h2>
+      <p>Roughly one developer. Each phase is independently useful on the day it ships.</p>
+
+      <div class="phase">
+        <div class="n">PHASE 1</div>
+        <div>
+          <h3>Registry + SELECT runner</h3>
+          <p>Grid entry, paste-from-Excel, DPAPI store. Parallel SELECT, client-wise grid, Excel
+            export, syntax-tree read-only guard. <span class="est">~2–3 weeks</span></p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="n">PHASE 2</div>
+        <div>
+          <h3>Update / Delete runner</h3>
+          <p>Dry-run row counts, per-DB transactions, audit log, target groups, production
+            confirmation, re-run failed. <span class="est">~2 weeks</span></p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="n">PHASE 3</div>
+        <div>
+          <h3>Programmable-object engine</h3>
+          <p>Auto-backup folder, <code>GO</code> handling, <code>CREATE OR ALTER</code>, manifest,
+            auto-generated rollback, local Git versioning. <span class="est">~3–4 weeks</span></p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="n">PHASE 4</div>
+        <div>
+          <h3>Fleet visibility</h3>
+          <p>Cross-client drift &amp; cohort grouping, pre-flight signature check, transient-error
+            retry, affected-row snapshots. <span class="est">~2 weeks</span></p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="n">PHASE 5</div>
+        <div>
+          <h3>Targeted patch mode</h3>
+          <p>Anchor / fuzzy / manual apply pipeline, per-client dry-run grid, ScriptDom validation,
+            per-client rollback from the captured original. <span class="est">~3 weeks</span></p>
+        </div>
+      </div>
+      <p style="margin-top: 22px; color: var(--ink-muted); font-size: 14px;">
+        A solid Phase 3 lands in roughly two months — one release cycle — with Phases 1 and 2 in use
+        well before that. Phases 4–5 turn it from a deployment tool into a way to manage the whole
+        client fleet.
+      </p>
+    </section>
+  </main>
+</div>
+
+<script>
+  (function () {
+    var btn = document.getElementById('themeToggle');
+    var root = document.documentElement;
+    function current() {
+      if (root.dataset.theme) return root.dataset.theme;
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    btn.addEventListener('click', function () {
+      root.dataset.theme = current() === 'dark' ? 'light' : 'dark';
+    });
+  })();
+</script>

@@ -1,0 +1,187 @@
+<UserControl x:Class="SqlHelper.App.Views.PatchView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:SqlHelper.App.ViewModels"
+             xmlns:controls="clr-namespace:SqlHelper.App.Controls"
+             d:DataContext="{d:DesignInstance vm:PatchViewModel}"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008/design" mc:Ignorable="d"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="14"/>
+            <ColumnDefinition Width="290"/>
+        </Grid.ColumnDefinitions>
+
+        <DockPanel Grid.Column="0">
+            <StackPanel DockPanel.Dock="Top">
+                <TextBlock Text="Patch Divergent Copies" Style="{StaticResource PageTitle}"/>
+                <TextBlock Style="{StaticResource PageSubtitle}">
+                    For when clients don't all have the same copy of a procedure. Instead of overwriting each one with a
+                    single canonical version — which would wipe out client-specific customisations — this changes only the
+                    lines you name, inside whatever each client actually has today.
+                </TextBlock>
+            </StackPanel>
+
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+
+                    <!-- Step 1 -->
+                    <Border Style="{StaticResource StepCard}">
+                        <StackPanel>
+                            <TextBlock Text="Step 1  ·  Which object, and who has what?" Style="{StaticResource SectionHeader}"/>
+                            <TextBlock Style="{StaticResource FieldHint}" Margin="0,0,0,10">
+                                Reads the object from every ticked database and groups them by what the code actually is. You
+                                normally find a handful of real versions, not one per client — so you author the change once per
+                                version, not once per client.
+                            </TextBlock>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBox Width="280" AutomationProperties.AutomationId="PatchObjectName" Text="{Binding ObjectNameText, UpdateSourceTrigger=PropertyChanged}"
+                                         Tag="dbo.usp_GetOrders"/>
+                                <Button Content="Analyse versions" Margin="8,0,0,0" Command="{Binding AnalyzeCohortsCommand}"/>
+                            </StackPanel>
+
+                            <ItemsControl ItemsSource="{Binding Cohorts}" Margin="0,12,0,0">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="{StaticResource BorderSoftBrush}"
+                                                BorderThickness="1" CornerRadius="5" Padding="11,8" Margin="0,0,0,7">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="Background" Value="{StaticResource SurfaceSunkBrush}"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsFailure}" Value="True">
+                                                            <Setter Property="Background" Value="{StaticResource CritSoftBrush}"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                            <StackPanel>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding Label}" FontWeight="SemiBold"/>
+                                                    <TextBlock Style="{StaticResource MutedText}" Margin="8,0,0,0" VerticalAlignment="Center">
+                                                        <Run Text="{Binding Count, Mode=OneWay}"/><Run Text=" client(s)"/>
+                                                    </TextBlock>
+                                                </StackPanel>
+                                                <TextBlock Text="{Binding Members}" Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                                                           Margin="0,3,0,0"/>
+                                                <TextBlock Text="{Binding Explanation}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                                           FontSize="12" Foreground="{StaticResource CritBrush}"
+                                                           Visibility="{Binding Explanation, Converter={StaticResource NullToCollapsedConverter}}"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Step 2 -->
+                    <Border Style="{StaticResource StepCard}">
+                        <StackPanel>
+                            <TextBlock Text="Step 2  ·  Describe the change" Style="{StaticResource SectionHeader}"/>
+                            <TextBlock Style="{StaticResource FieldHint}" Margin="0,0,0,10">
+                                Paste one reference version as it is now on the left, and the same version with your fix on the
+                                right. The tool works out what changed between them — that difference is what gets applied
+                                everywhere. A USE / SET / GO preamble on either side is stripped automatically.
+                            </TextBlock>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Before — as it is today" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox Style="{StaticResource CodeBox}" Height="150"
+                                             AutomationProperties.AutomationId="PatchBefore" Text="{Binding BeforeScript, UpdateSourceTrigger=PropertyChanged}"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="After — with your fix" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox Style="{StaticResource CodeBox}" Height="150"
+                                             AutomationProperties.AutomationId="PatchAfter" Text="{Binding AfterScript, UpdateSourceTrigger=PropertyChanged}"/>
+                                </StackPanel>
+                            </Grid>
+                            <Button Content="Work out the change" Margin="0,10,0,0" HorizontalAlignment="Left" AutomationProperties.AutomationId="BuildPatch"
+                                    Command="{Binding BuildPatchCommand}"/>
+
+                            <StackPanel Visibility="{Binding HasPatchPreview, Converter={StaticResource BoolToVisibilityConverter}}">
+                                <TextBlock Text="This is what will be applied" Style="{StaticResource FieldLabel}" Margin="0,12,0,4"/>
+                                <controls:DiffReviewPanel DataContext="{Binding PatchPreview}" Height="200"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Step 3 -->
+                    <Border Style="{StaticResource StepCard}">
+                        <StackPanel>
+                            <TextBlock Text="Step 3  ·  Check it against every client, then apply" Style="{StaticResource SectionHeader}"/>
+                            <TextBlock Style="{StaticResource FieldHint}" Margin="0,0,0,10">
+                                Nothing is written yet. Each client is tried three ways in order: an exact line match; a tolerant
+                                match if the surrounding code has shifted; and if neither is confident, it's flagged for a hand
+                                edit rather than guessed at. Click a row to see exactly what would change there.
+                            </TextBlock>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                <TextBox Width="230" Text="{Binding ChangeTitle, UpdateSourceTrigger=PropertyChanged}"
+                                         Tag="Description (optional)"/>
+                                <TextBox Width="130" Margin="8,0,0,0" Text="{Binding Ticket, UpdateSourceTrigger=PropertyChanged}"
+                                         Tag="Ticket"/>
+                                <Button Content="Check all clients" Margin="12,0,0,0" Command="{Binding PlanPatchCommand}"/>
+                                <TextBlock Text="{Binding StatusMessage}" Style="{StaticResource MutedText}" VerticalAlignment="Center"
+                                           Margin="12,0,0,0" TextWrapping="Wrap"/>
+                            </StackPanel>
+
+                            <Grid Height="430">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="1.05*"/>
+                                    <ColumnDefinition Width="10"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <DataGrid Grid.Column="0" ItemsSource="{Binding PlanRows}" SelectedItem="{Binding SelectedPlanRow}"
+                                          IsReadOnly="False" AutoGenerateColumns="False">
+                                    <DataGrid.Columns>
+                                        <DataGridCheckBoxColumn Header="Apply" Binding="{Binding IsApproved}" Width="46"/>
+                                        <DataGridTextColumn Header="Client" Binding="{Binding ClientName}" Width="120" IsReadOnly="True"/>
+                                        <DataGridTextColumn Header="Outcome" Binding="{Binding Outcome}" Width="*" IsReadOnly="True"/>
+                                        <DataGridTextColumn Header="Match" Binding="{Binding Tier}" Width="60" IsReadOnly="True"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+
+                                <controls:DiffReviewPanel Grid.Column="2" DataContext="{Binding SelectedDiff}"
+                                                          EmptyMessage="Select a client on the left to see exactly what would change there."/>
+                            </Grid>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <Button Content="Tick every clean match" Command="{Binding ApproveAllCleanCommand}"/>
+                                <Button Content="Apply to ticked clients" Margin="10,0,0,0" Style="{StaticResource PrimaryButton}"
+                                        Command="{Binding ApplyApprovedCommand}"/>
+                                <TextBlock VerticalAlignment="Center" Margin="12,0,0,0" Style="{StaticResource MutedText}">
+                                    <Run Text="{Binding ApprovedCount, Mode=OneWay}"/><Run Text=" ticked"/>
+                                </TextBlock>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}"
+                            Visibility="{Binding ApplyResults.Count, Converter={StaticResource CountToVisibilityConverter}}">
+                        <StackPanel>
+                            <TextBlock Text="Result" Style="{StaticResource SectionHeader}"/>
+                            <DataGrid ItemsSource="{Binding ApplyResults}" IsReadOnly="True" AutoGenerateColumns="False" MaxHeight="220">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Client" Binding="{Binding ClientName}" Width="170"/>
+                                    <DataGridTextColumn Header="Result" Binding="{Binding Status}" Width="110"/>
+                                    <DataGridTextColumn Header="Method" Binding="{Binding Method}" Width="110"/>
+                                    <DataGridTextColumn Header="Error" Binding="{Binding Error}" Width="*"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+        </DockPanel>
+
+        <controls:TargetPickerControl Grid.Column="2" DataContext="{Binding Picker}"/>
+    </Grid>
+</UserControl>

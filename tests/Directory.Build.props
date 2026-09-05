@@ -1,0 +1,14 @@
+<Project>
+
+  <!-- Inherit repo-wide settings, then relax a few things that only make sense for product code. -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <PropertyGroup>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <IsPackable>false</IsPackable>
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
+    <!-- Underscored test names are intentional and readable; a couple of xUnit style nags are noise. -->
+    <NoWarn>$(NoWarn);CA1707;xUnit2029</NoWarn>
+  </PropertyGroup>
+
+</Project>
