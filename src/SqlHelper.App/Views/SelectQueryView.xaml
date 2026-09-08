@@ -107,6 +107,7 @@
                                                    Foreground="{StaticResource WarnBrush}"/>
                                     </Border>
                                     <DataGrid ItemsSource="{Binding PrimaryTable}" IsReadOnly="True" AutoGenerateColumns="True"
+                                              AutoGeneratingColumn="OnAutoGeneratingColumn"
                                               Visibility="{Binding Success, Converter={StaticResource BoolToVisibilityConverter}}"/>
                                 </DockPanel>
                             </DataTemplate>

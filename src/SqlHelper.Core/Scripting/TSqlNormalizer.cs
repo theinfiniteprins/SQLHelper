@@ -180,9 +180,48 @@ public static partial class TSqlNormalizer
             true,
             KindOf(module),
             NameOf(module),
-            Slice(script, module),
+            SliceWithLeadingComments(script, fragment, module),
             removed,
             null);
+    }
+
+    /// <summary>
+    /// The module statement, plus the comment block written directly above it.
+    ///
+    /// ScriptDom's statement offset starts at the CREATE keyword, so slicing on it alone throws
+    /// away the header comment nearly every real procedure carries — author, date, change history.
+    /// Those are part of the procedure and must be deployed with it. Only the USE / SET / GO
+    /// preamble is dropped, and walking back stops at the batch separator, so a comment that
+    /// belongs to the preamble does not get dragged along with the module.
+    /// </summary>
+    private static string SliceWithLeadingComments(string script, TSqlFragment root, TSqlStatement module)
+    {
+        int start = module.StartOffset;
+        IList<TSqlParserToken> tokens = root.ScriptTokenStream;
+
+        if (tokens is not null)
+        {
+            for (int i = module.FirstTokenIndex - 1; i >= 0; i--)
+            {
+                TSqlParserToken token = tokens[i];
+
+                if (token.TokenType is TSqlTokenType.WhiteSpace)
+                {
+                    continue;
+                }
+
+                if (token.TokenType is TSqlTokenType.SingleLineComment or TSqlTokenType.MultilineComment)
+                {
+                    start = token.Offset;
+                    continue;
+                }
+
+                break; // GO, a semicolon, or the preamble itself — the comments above it are not ours.
+            }
+        }
+
+        int end = module.StartOffset + module.FragmentLength;
+        return script[start..end];
     }
 
     internal static bool IsModuleStatement(TSqlStatement statement) =>

@@ -381,6 +381,15 @@ public sealed class DeploymentEngine
 
     private static async Task RunModuleScriptInTransactionAsync(SqlConnection connection, ProgrammableObject module, CancellationToken cancellationToken)
     {
+        // Without a rewritable verb this would fire a bare CREATE at an object that already
+        // exists, which fails on the server with a much less helpful message. Catch it here.
+        if (!ModuleScript.CanRewriteVerb(module.Definition))
+        {
+            throw new InvalidOperationException(
+                "Could not find the CREATE / ALTER at the start of this definition, so it was not run. " +
+                "Nothing was changed on this database.");
+        }
+
         string script = ModuleScript.ToRunnableScript(module, forceCreateOrAlter: true);
         IReadOnlyList<ScriptBatch> batches = GoBatchSplitter.Split(script);
 

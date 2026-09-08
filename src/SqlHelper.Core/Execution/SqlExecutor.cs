@@ -223,7 +223,9 @@ public sealed class SqlExecutor
         for (int i = 0; i < reader.FieldCount; i++)
         {
             columns[i] = new QueryColumn(
-                reader.GetName(i) is { Length: > 0 } name ? name : $"(col {i + 1})",
+                // SELECT COUNT(*) with no alias has no column name at all. Label it the way SSMS
+                // does, so the grid and the Excel export both have something to show.
+                reader.GetName(i) is { Length: > 0 } name ? name : "(No column name)",
                 reader.GetFieldType(i)?.Name ?? "object",
                 reader.GetDataTypeName(i));
         }

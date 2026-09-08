@@ -202,4 +202,78 @@ public sealed class DeploymentEngineTests : IDisposable
         Assert.Contains("SELECT TOP 10", now!.Definition);
         Assert.DoesNotContain("AND Active = 1", now.Definition);
     }
+    [Fact]
+    public async Task A_procedure_with_a_comment_header_can_still_be_patched_in_place()
+    {
+        // The case that failed in production: sys.sql_modules hands back the header comment above
+        // CREATE, so the verb is not at character zero. The rewrite to CREATE OR ALTER used to
+        // miss it, a bare CREATE was fired at an object that already existed, and every client
+        // came back failed after its backup had been taken.
+        DatabaseTarget acme = await _sql.CreateClientDatabaseAsync("Acme");
+
+        const string header =
+            "-- =============================================\n" +
+            "-- Author:      A. Developer\n" +
+            "-- Description: Returns orders for one customer.\n" +
+            "-- =============================================\n";
+
+        const string before = header +
+            "CREATE PROCEDURE dbo.usp_GetOrders @id int AS\nBEGIN\n  SELECT * FROM dbo.Orders WHERE Id = @id\nEND";
+        const string after = header +
+            "CREATE PROCEDURE dbo.usp_GetOrders @id int AS\nBEGIN\n  SELECT * FROM dbo.Orders WHERE Id = @id AND Active = 1\nEND";
+
+        await _sql.ExecOnAsync(acme, before);
+
+        ObjectName objectName = ObjectName.Parse("dbo.usp_GetOrders");
+        PatchDefinitionResult built = PatchDefinitionFactory.FromReferenceDiff("ORD-1", before, after);
+        Assert.True(built.Ok, built.Error);
+
+        IReadOnlyList<PatchAttempt> attempts = await _engine.PlanPatchAsync([acme], objectName, built.Patch!);
+        Assert.Equal(PatchOutcome.Applied, attempts[0].Outcome);
+
+        DeployResult deployed = await _engine.ApplyPatchAsync(attempts, objectName, BackupRoot, "ORD-1 rollout", "ORD-1");
+
+        Assert.Equal(1, deployed.SucceededCount);
+        Assert.Equal(0, deployed.FailedCount);
+
+        var inspector = new ObjectInspector();
+        await using var conn = await _sql.Connections.OpenAsync(acme, CancellationToken.None);
+        ProgrammableObject? now = await inspector.GetAsync(conn, objectName);
+
+        Assert.Contains("AND Active = 1", now!.Definition, StringComparison.Ordinal);
+        Assert.Contains("-- Author:      A. Developer", now.Definition, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Deploying_an_object_keeps_the_comment_header_and_drops_only_the_USE_preamble()
+    {
+        DatabaseTarget acme = await _sql.CreateClientDatabaseAsync("Acme");
+        await _sql.ExecOnAsync(acme, "CREATE PROCEDURE dbo.usp_GetOrders AS SELECT 1 AS Old");
+
+        // Exactly what SSMS scripts out and the operator pastes in.
+        const string script =
+            "USE [AcmeDb]\nGO\nSET ANSI_NULLS ON\nGO\nSET QUOTED_IDENTIFIER ON\nGO\n" +
+            "-- =============================================\n" +
+            "-- Author:      A. Developer\n" +
+            "-- Create date: 2019-04-02\n" +
+            "-- Description: Returns orders. Do not remove this header.\n" +
+            "-- =============================================\n" +
+            "CREATE PROCEDURE dbo.usp_GetOrders AS SELECT 2 AS New";
+
+        DeployResult result = await _engine.DeployObjectAsync(
+            [acme], ObjectName.Parse("dbo.usp_GetOrders"), script, BackupRoot, "keep the header");
+
+        Assert.Equal(1, result.SucceededCount);
+
+        var inspector = new ObjectInspector();
+        await using var conn = await _sql.Connections.OpenAsync(acme, CancellationToken.None);
+        ProgrammableObject? now = await inspector.GetAsync(conn, ObjectName.Parse("dbo.usp_GetOrders"));
+
+        Assert.Contains("SELECT 2 AS New", now!.Definition, StringComparison.Ordinal);
+        Assert.Contains("-- Author:      A. Developer", now.Definition, StringComparison.Ordinal);
+        Assert.Contains("-- Description: Returns orders. Do not remove this header.", now.Definition, StringComparison.Ordinal);
+
+        // The USE / SET preamble is the only thing that should have been stripped.
+        Assert.DoesNotContain("USE [AcmeDb]", now.Definition, StringComparison.OrdinalIgnoreCase);
+    }
 }

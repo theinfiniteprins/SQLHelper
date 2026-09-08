@@ -150,7 +150,7 @@ public partial class SelectQueryViewModel : ObservableObject, IDisposable
         {
             var rows = Results
                 .Where(r => r is { Success: true, PrimaryTable: not null })
-                .Select(r => (r.ClientName, ToQueryTable(r.PrimaryTable!)))
+                .Select(r => (r.ClientName, QueryResultPresentation.ToQueryTable(r.PrimaryTable!)))
                 .ToList();
 
             if (rows.Count == 0)
@@ -193,17 +193,6 @@ public partial class SelectQueryViewModel : ObservableObject, IDisposable
             Truncated = first?.Truncated ?? false,
             Messages = run.Result.Messages,
         };
-    }
-
-    private static QueryTable ToQueryTable(DataView view)
-    {
-        DataTable table = view.Table!;
-        var columns = table.Columns.Cast<DataColumn>()
-            .Select(c => new QueryColumn(c.ColumnName, "object", "object")).ToList();
-        var rows = table.Rows.Cast<DataRow>()
-            .Select(r => columns.Select((_, i) => r[i] is DBNull ? null : r[i]).ToArray())
-            .ToList();
-        return new QueryTable { Columns = columns, Rows = rows };
     }
 
     public void Dispose()
