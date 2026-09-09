@@ -66,12 +66,17 @@ public static class FuzzyPatcher
         int minLength = Math.Max(1, anchorLines.Length - WindowFlex);
         int maxLength = anchorLines.Length + WindowFlex;
 
+        // Every window is scored against the same anchor over the same lines, so the pair scores
+        // are computed once and reused; without this a long anchor makes the search take minutes.
+        var similarity = new LineSimilarityCache(anchorLines, targetTrimmed);
+
         for (int length = minLength; length <= maxLength; length++)
         {
             for (int start = 0; start + length <= targetTrimmed.Length; start++)
             {
-                var window = new ArraySegment<string>(targetTrimmed, start, length);
-                double score = LineSimilarity.AlignBlocks(anchorLines, window);
+                int windowStart = start;
+                double score = LineSimilarity.AlignBlocks(
+                    anchorLines.Length, length, (i, j) => similarity.Of(i, windowStart + j));
 
                 if (score > best.Score)
                 {

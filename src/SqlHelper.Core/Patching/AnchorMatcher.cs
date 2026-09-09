@@ -33,12 +33,7 @@ public static class AnchorMatcher
         ArgumentNullException.ThrowIfNull(replacement);
 
         List<RawLine> targetLines = LineSplitter.Split(target);
-        string[] anchorLines = LineSplitter.Split(anchor).Select(l => l.Trimmed).ToArray();
-        // Drop a trailing blank line the splitter adds for text ending in a newline.
-        if (anchorLines.Length > 1 && anchorLines[^1].Length == 0)
-        {
-            anchorLines = anchorLines[..^1];
-        }
+        string[] anchorLines = EffectiveAnchorLines(anchor);
 
         if (anchorLines.Length == 0)
         {
@@ -84,6 +79,23 @@ public static class AnchorMatcher
 
         string patched = beforeText + replacementText + afterText;
         return new AnchorMatchResult(AnchorMatchStatus.Unique, patched, 1, start + 1);
+    }
+
+    /// <summary>
+    /// The lines an anchor is actually matched on: trimmed, minus the trailing blank line the
+    /// splitter produces for text ending in a newline.
+    ///
+    /// Whoever decides an anchor is unique must measure it exactly the way this matcher will use
+    /// it. When the two disagree — the builder counting one line more than the matcher compares —
+    /// an anchor passes as unique and then matches twice against the client, and the change is
+    /// refused on every database for no visible reason. So both go through here.
+    /// </summary>
+    public static string[] EffectiveAnchorLines(string anchor)
+    {
+        ArgumentNullException.ThrowIfNull(anchor);
+
+        string[] lines = [.. LineSplitter.Split(anchor).Select(l => l.Trimmed)];
+        return lines.Length > 1 && lines[^1].Length == 0 ? lines[..^1] : lines;
     }
 
     internal static string NormalizeReplacementEnding(string replacement, string ending, bool needsTrailingEnding)
