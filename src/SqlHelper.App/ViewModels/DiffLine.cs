@@ -1,5 +1,5 @@
-using DiffPlex.DiffBuilder;
-using DiffPlex.DiffBuilder.Model;
+using System.Text;
+using SqlHelper.Core.Patching;
 
 namespace SqlHelper.App.ViewModels;
 
@@ -15,6 +15,9 @@ public enum DiffLineKind
 /// <param name="ChangeIndex">Which change block this line belongs to; -1 for unchanged lines.</param>
 public sealed record DiffLine(DiffLineKind Kind, int? LineNumber, string Text, int ChangeIndex)
 {
+    /// <summary>Tab stops every four columns, the way SSMS shows them, so indentation lines up.</summary>
+    public const int TabSize = 4;
+
     public bool IsChange => Kind != DiffLineKind.Unchanged;
 
     public string Prefix => Kind switch
@@ -25,6 +28,37 @@ public sealed record DiffLine(DiffLineKind Kind, int? LineNumber, string Text, i
     };
 
     public string LineNumberText => LineNumber?.ToString() ?? string.Empty;
+
+    /// <summary>
+    /// The text as it should look on screen. A tab rendered by WPF jumps to a stop measured in
+    /// device units rather than columns, so a tab-indented procedure never lined up the way it
+    /// does in SSMS. Tabs are expanded to spaces for display only; <see cref="Text"/> stays exact
+    /// for copying.
+    /// </summary>
+    public string DisplayText { get; } = ExpandTabs(Text);
+
+    private static string ExpandTabs(string text)
+    {
+        if (!text.Contains('\t', StringComparison.Ordinal))
+        {
+            return text;
+        }
+
+        var expanded = new StringBuilder(text.Length + 16);
+        foreach (char c in text)
+        {
+            if (c == '\t')
+            {
+                expanded.Append(' ', TabSize - (expanded.Length % TabSize));
+            }
+            else
+            {
+                expanded.Append(c);
+            }
+        }
+
+        return expanded.ToString();
+    }
 }
 
 /// <summary>
@@ -76,23 +110,43 @@ public sealed record DiffStats(int Modified, int Added, int Removed, int Unchang
 
 public static class DiffRenderer
 {
+    /// <summary>
+    /// Lines of <paramref name="before"/> and <paramref name="after"/> laid out as one inline diff.
+    ///
+    /// Alignment uses <see cref="LineDiff"/>, which anchors on distinctive lines, so a change of
+    /// several lines reads as one block rather than being scattered across every <c>(</c> and
+    /// <c>END</c> that happens to match. With <paramref name="ignoreWhitespace"/> on, lines are
+    /// compared by <see cref="SqlLineKeys"/>: a tab added in the middle of a line is formatting and
+    /// disappears, whitespace inside a string literal is content and still shows.
+    /// </summary>
     public static IReadOnlyList<DiffLine> Build(string? before, string? after, bool ignoreWhitespace = false)
     {
-        DiffPaneModel model = InlineDiffBuilder.Diff(before ?? string.Empty, after ?? string.Empty, ignoreWhitespace);
+        string[] oldLines = SplitLines(before);
+        string[] newLines = SplitLines(after);
 
-        var lines = new List<DiffLine>(model.Lines.Count);
+        IReadOnlyList<LineDiffOp> ops = ignoreWhitespace
+            ? LineDiff.Compute(SqlLineKeys.Compute(oldLines), SqlLineKeys.Compute(newLines))
+            : LineDiff.Compute(oldLines, newLines);
+
+        var lines = new List<DiffLine>(Math.Max(oldLines.Length, newLines.Length) + 8);
         int changeIndex = -1;
         bool inChange = false;
 
-        foreach (DiffPiece piece in model.Lines)
+        foreach (LineDiffOp op in ops)
         {
-            DiffLineKind kind = Map(piece.Type);
-
-            if (kind == DiffLineKind.Unchanged)
+            if (op.Kind == LineDiffKind.Equal)
             {
                 inChange = false;
+                for (int k = 0; k < op.Count; k++)
+                {
+                    // The new side's text: with whitespace ignored the two may differ in formatting.
+                    lines.Add(new DiffLine(DiffLineKind.Unchanged, op.NewStart + k + 1, newLines[op.NewStart + k], -1));
+                }
+
+                continue;
             }
-            else if (!inChange)
+
+            if (!inChange)
             {
                 // A run of adjacent changed lines counts as one block, which is what a reader
                 // means by "the next change".
@@ -100,7 +154,12 @@ public static class DiffRenderer
                 changeIndex++;
             }
 
-            lines.Add(new DiffLine(kind, piece.Position, piece.Text ?? string.Empty, kind == DiffLineKind.Unchanged ? -1 : changeIndex));
+            for (int k = 0; k < op.Count; k++)
+            {
+                lines.Add(op.Kind == LineDiffKind.Delete
+                    ? new DiffLine(DiffLineKind.Deleted, null, oldLines[op.OldStart + k], changeIndex)
+                    : new DiffLine(DiffLineKind.Inserted, op.NewStart + k + 1, newLines[op.NewStart + k], changeIndex));
+            }
         }
 
         return lines;
@@ -132,11 +191,14 @@ public static class DiffRenderer
         return new DiffStats(modified, added, removed, unchanged, blocks);
     }
 
-    private static DiffLineKind Map(ChangeType type) => type switch
+    /// <summary>Splits on any line ending, keeping every line including a final empty one.</summary>
+    internal static string[] SplitLines(string? text)
     {
-        ChangeType.Inserted => DiffLineKind.Inserted,
-        ChangeType.Deleted => DiffLineKind.Deleted,
-        ChangeType.Modified => DiffLineKind.Modified,
-        _ => DiffLineKind.Unchanged,
-    };
+        if (string.IsNullOrEmpty(text))
+        {
+            return [];
+        }
+
+        return text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n');
+    }
 }

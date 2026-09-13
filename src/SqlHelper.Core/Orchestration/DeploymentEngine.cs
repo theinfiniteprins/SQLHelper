@@ -301,7 +301,8 @@ public sealed class DeploymentEngine
             current?.UsesAnsiNulls ?? true, current?.UsesQuotedIdentifier ?? true,
             0, DateTime.UtcNow, DateTime.UtcNow, IsEncrypted: false);
 
-        await RunModuleScriptInTransactionAsync(connection, newModule, cancellationToken).ConfigureAwait(false);
+        await RunModuleScriptInTransactionAsync(
+            connection, newModule, current is null ? ModuleVerb.Create : ModuleVerb.Alter, cancellationToken).ConfigureAwait(false);
 
         ProgrammableObject? after = await _inspector.GetAsync(connection, objectName, cancellationToken).ConfigureAwait(false);
         string? afterHash = after?.HasDefinition == true ? TSqlNormalizer.ExactKey(after.Definition) : null;
@@ -337,7 +338,7 @@ public sealed class DeploymentEngine
         string beforeHash = TSqlNormalizer.ExactKey(current.Definition);
 
         var patchedModule = current with { Definition = attempt.PatchedBody! };
-        await RunModuleScriptInTransactionAsync(connection, patchedModule, cancellationToken).ConfigureAwait(false);
+        await RunModuleScriptInTransactionAsync(connection, patchedModule, ModuleVerb.Alter, cancellationToken).ConfigureAwait(false);
 
         ProgrammableObject? after = await _inspector.GetAsync(connection, objectName, cancellationToken).ConfigureAwait(false);
         string? afterHash = after?.HasDefinition == true ? TSqlNormalizer.ExactKey(after.Definition) : null;
@@ -379,7 +380,20 @@ public sealed class DeploymentEngine
         }
     }
 
-    private static async Task RunModuleScriptInTransactionAsync(SqlConnection connection, ProgrammableObject module, CancellationToken cancellationToken)
+    /// <summary>
+    /// Runs a module definition inside a transaction and proves what landed before committing.
+    ///
+    /// <paramref name="verb"/> is <c>ALTER</c> for an object that exists and <c>CREATE</c> for one that
+    /// does not — never <c>CREATE OR ALTER</c>, which SQL Server stores with two stray spaces after
+    /// the verb (see <see cref="ModuleScript"/>).
+    ///
+    /// After the script runs, and while the transaction is still open, the definition is read back.
+    /// The server stores the text with its verb rewritten to <c>CREATE</c> and every other character
+    /// unchanged, so it must equal <see cref="ModuleScript.ExpectedStoredDefinition"/> exactly. If it
+    /// does not, nothing is committed: the database is left precisely as it was.
+    /// </summary>
+    private static async Task RunModuleScriptInTransactionAsync(
+        SqlConnection connection, ProgrammableObject module, ModuleVerb verb, CancellationToken cancellationToken)
     {
         // Without a rewritable verb this would fire a bare CREATE at an object that already
         // exists, which fails on the server with a much less helpful message. Catch it here.
@@ -390,7 +404,8 @@ public sealed class DeploymentEngine
                 "Nothing was changed on this database.");
         }
 
-        string script = ModuleScript.ToRunnableScript(module, forceCreateOrAlter: true);
+        string script = ModuleScript.ToRunnableScript(module, verb);
+        string expectedStored = ModuleScript.ExpectedStoredDefinition(module.Definition).Trim();
         IReadOnlyList<ScriptBatch> batches = GoBatchSplitter.Split(script);
 
         await using SqlTransaction transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
@@ -404,12 +419,44 @@ public sealed class DeploymentEngine
                 await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
 
+            await VerifyStoredDefinitionAsync(connection, transaction, module.Name, expectedStored, cancellationToken).ConfigureAwait(false);
+
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         }
         catch
         {
             await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
             throw;
+        }
+    }
+
+    private static async Task VerifyStoredDefinitionAsync(
+        SqlConnection connection, SqlTransaction transaction, ObjectName name, string expected, CancellationToken cancellationToken)
+    {
+        await using SqlCommand read = connection.CreateCommand();
+        read.Transaction = transaction;
+        read.CommandText = "SELECT OBJECT_ID(@name), OBJECT_DEFINITION(OBJECT_ID(@name));";
+        read.Parameters.AddWithValue("@name", name.Bracketed);
+
+        await using SqlDataReader reader = await read.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false) || reader.IsDBNull(0))
+        {
+            throw new InvalidOperationException(
+                "The object could not be found after the script ran, so the change was rolled back. Nothing was changed on this database.");
+        }
+
+        if (reader.IsDBNull(1))
+        {
+            // WITH ENCRYPTION: the server will not show the text back, so existence is all that can be confirmed.
+            return;
+        }
+
+        string stored = reader.GetString(1);
+        if (!string.Equals(stored, expected, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "After running, the server did not hold exactly the reviewed definition, so the change was rolled back. " +
+                "Nothing was changed on this database.");
         }
     }
 

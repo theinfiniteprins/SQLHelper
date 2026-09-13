@@ -61,7 +61,8 @@ public sealed class BackupWriterTests : IDisposable
         Assert.Equal($"dbo.usp_GetOrders_{session.Timestamp}.sql", Path.GetFileName(path));
         Assert.Contains("Client     : Acme", content);
         Assert.Contains("Server      : sql-01", content);
-        Assert.Contains("CREATE OR ALTER PROCEDURE dbo.usp_GetOrders", content);
+        Assert.Contains("ALTER PROCEDURE dbo.usp_GetOrders", content);
+        Assert.DoesNotContain("OR ALTER", content, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -100,7 +101,8 @@ public sealed class BackupWriterTests : IDisposable
             [new DroppedObject(new ObjectName("dbo", "usp_BrandNew"), ProgrammableObjectKind.StoredProcedure)]);
         string content = await File.ReadAllTextAsync(path);
 
-        Assert.Contains("CREATE OR ALTER PROCEDURE dbo.usp_GetOrders", content);
+        Assert.Contains("ALTER PROCEDURE dbo.usp_GetOrders", content);
+        Assert.DoesNotContain("OR ALTER", content, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("DROP PROCEDURE IF EXISTS [dbo].[usp_BrandNew]", content);
     }
 

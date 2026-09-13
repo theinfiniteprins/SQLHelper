@@ -90,8 +90,12 @@ public sealed class FuzzyPatcherTests
     }
 
     [Fact]
-    public void A_renamed_alias_throughout_the_block_still_matches()
+    public void A_client_that_renamed_the_alias_on_the_line_being_changed_is_refused_not_mangled()
     {
+        // The change rewrites "WHERE o.CreatedOn ..." but this client calls the alias "ord". There is
+        // no correct text to produce: keeping the client's line drops the change, taking the
+        // reference line introduces an alias that does not exist in this client's query. The earlier
+        // merge produced both WHERE lines, one after the other. The only safe answer is a hand edit.
         string drifted = LongProcedure()
             .Replace("SELECT o.Id, o.Total", "SELECT ord.Id, ord.Total", StringComparison.Ordinal)
             .Replace("FROM dbo.Orders o", "FROM dbo.Orders ord", StringComparison.Ordinal)
@@ -99,7 +103,9 @@ public sealed class FuzzyPatcherTests
 
         FuzzyPatchResult result = FuzzyPatcher.TryApply(drifted, Anchor, Replacement);
 
-        Assert.True(result.Applied, result.Reason);
+        Assert.False(result.Applied);
+        Assert.Null(result.PatchedText);
+        Assert.Contains("own version", result.Reason, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -57,6 +57,12 @@ public partial class PatchViewModel : ObservableObject
     /// <summary>What would change on the client currently selected in the plan list.</summary>
     public DiffReviewViewModel SelectedDiff { get; } = new();
 
+    /// <summary>The live comparison shown beside the Before/After editors while they are being edited.</summary>
+    public DiffReviewViewModel EditorDiff { get; } = new();
+
+    /// <summary>Why the selected client came out the way it did, in words.</summary>
+    public string SelectedPlanSummary => SelectedPlanRow is { } row ? $"{row.ClientName}: {row.Summary}" : string.Empty;
+
     [ObservableProperty]
     private bool hasPatchPreview;
 
@@ -75,8 +81,63 @@ public partial class PatchViewModel : ObservableObject
         backupRoot = session.Paths.DefaultBackupRoot;
     }
 
+    /// <summary>
+    /// Editing either reference after the change was worked out makes that change - and every plan
+    /// built from it - describe something other than what is now on screen. Checking clients or
+    /// applying from it would deploy the old change, so it is discarded and must be worked out again.
+    /// </summary>
+    partial void OnBeforeScriptChanged(string value) => InvalidateBuiltPatch();
+
+    partial void OnAfterScriptChanged(string value) => InvalidateBuiltPatch();
+
+    private void InvalidateBuiltPatch()
+    {
+        if (_builtPatch is null && PlanRows.Count == 0)
+        {
+            return;
+        }
+
+        _builtPatch = null;
+        HasPatchPreview = false;
+        SelectedPlanRow = null;
+        PlanRows.Clear();
+        OnPropertyChanged(nameof(ApprovedCount));
+        StatusMessage = "The Before/After text changed, so the change has to be worked out again before checking clients.";
+    }
+
+    /// <summary>
+    /// Re-renders the live comparison beside the editors. Compares the objects themselves when both
+    /// scripts parse, so a USE / SET / GO preamble never shows up as a difference; otherwise the text
+    /// as typed, so half-finished edits are still visible.
+    /// </summary>
+    public void RefreshEditorDiff()
+    {
+        (string before, string after) = ComparableTexts(BeforeScript, AfterScript);
+        EditorDiff.Refresh(before, after);
+    }
+
+    /// <summary>Loads the live comparison fresh, landing on its first change.</summary>
+    public void LoadEditorDiff()
+    {
+        (string before, string after) = ComparableTexts(BeforeScript, AfterScript);
+        EditorDiff.SetContent(before, after, "Before compared with after");
+    }
+
+    private static (string Before, string After) ComparableTexts(string before, string after)
+    {
+        if (string.IsNullOrWhiteSpace(before) || string.IsNullOrWhiteSpace(after))
+        {
+            return (before, after);
+        }
+
+        ModuleExtraction b = TSqlNormalizer.ExtractModule(before);
+        ModuleExtraction a = TSqlNormalizer.ExtractModule(after);
+        return b.Ok && a.Ok ? (b.ModuleText, a.ModuleText) : (before, after);
+    }
+
     partial void OnSelectedPlanRowChanged(PatchPlanRow? value)
     {
+        OnPropertyChanged(nameof(SelectedPlanSummary));
         if (value is null)
         {
             SelectedDiff.SetContent(string.Empty, string.Empty);
@@ -151,7 +212,8 @@ public partial class PatchViewModel : ObservableObject
         }
 
         _builtPatch = result.Patch;
-        PatchPreview.SetContent(BeforeScript, AfterScript, "The change you are about to apply");
+        (string before, string after) = ComparableTexts(BeforeScript, AfterScript);
+        PatchPreview.SetContent(before, after, "The change you are about to apply");
         HasPatchPreview = true;
         PlanRows.Clear();
         ApplyResults.Clear();

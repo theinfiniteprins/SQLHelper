@@ -1,4 +1,4 @@
-<UserControl x:Class="SqlHelper.App.Views.PatchView"
+<UserControl x:Class="SqlHelper.App.Views.PatchView" x:Name="Self"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:SqlHelper.App.ViewModels"
@@ -93,21 +93,28 @@
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0">
                                     <TextBlock Text="Before — as it is today" Style="{StaticResource FieldLabel}"/>
-                                    <TextBox Style="{StaticResource CodeBox}" Height="150"
+                                    <TextBox Style="{StaticResource CodeBox}" Height="240"
                                              AutomationProperties.AutomationId="PatchBefore" Text="{Binding BeforeScript, UpdateSourceTrigger=PropertyChanged}"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="2">
                                     <TextBlock Text="After — with your fix" Style="{StaticResource FieldLabel}"/>
-                                    <TextBox Style="{StaticResource CodeBox}" Height="150"
+                                    <TextBox Style="{StaticResource CodeBox}" Height="240"
                                              AutomationProperties.AutomationId="PatchAfter" Text="{Binding AfterScript, UpdateSourceTrigger=PropertyChanged}"/>
                                 </StackPanel>
                             </Grid>
-                            <Button Content="Work out the change" Margin="0,10,0,0" HorizontalAlignment="Left" AutomationProperties.AutomationId="BuildPatch"
-                                    Command="{Binding BuildPatchCommand}"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                <Button Content="Work out the change" AutomationProperties.AutomationId="BuildPatch"
+                                        Command="{Binding BuildPatchCommand}"/>
+                                <Button Content="⛶  Edit in full screen" Margin="10,0,0,0" AutomationProperties.AutomationId="OpenPatchEditor"
+                                        Command="{Binding OpenEditorCommand, ElementName=Self}"
+                                        ToolTip="Edit Before and After side by side in a full-screen window, with the comparison updating as you type"/>
+                            </StackPanel>
 
                             <StackPanel Visibility="{Binding HasPatchPreview, Converter={StaticResource BoolToVisibilityConverter}}">
                                 <TextBlock Text="This is what will be applied" Style="{StaticResource FieldLabel}" Margin="0,12,0,4"/>
-                                <controls:DiffReviewPanel DataContext="{Binding PatchPreview}" Height="200"/>
+                                <controls:DiffReviewPanel DataContext="{Binding PatchPreview}" Height="360"
+                                                          ExpandLabel="⛶  Edit in full screen"
+                                                          ExpandCommand="{Binding OpenEditorCommand, ElementName=Self}"/>
                             </StackPanel>
                         </StackPanel>
                     </Border>
@@ -132,7 +139,7 @@
                                            Margin="12,0,0,0" TextWrapping="Wrap"/>
                             </StackPanel>
 
-                            <Grid Height="430">
+                            <Grid Height="500">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="1.05*"/>
                                     <ColumnDefinition Width="10"/>
@@ -149,8 +156,14 @@
                                     </DataGrid.Columns>
                                 </DataGrid>
 
-                                <controls:DiffReviewPanel Grid.Column="2" DataContext="{Binding SelectedDiff}"
-                                                          EmptyMessage="Select a client on the left to see exactly what would change there."/>
+                                <DockPanel Grid.Column="2">
+                                    <TextBlock DockPanel.Dock="Top" Text="{Binding SelectedPlanSummary}" TextWrapping="Wrap"
+                                               Style="{StaticResource FieldHint}" Margin="0,0,0,6"
+                                               Visibility="{Binding SelectedPlanRow, Converter={StaticResource NullToCollapsedConverter}}"/>
+                                    <controls:DiffReviewPanel DataContext="{Binding SelectedDiff}"
+                                                              ExpandCommand="{Binding OpenPlanReviewCommand, ElementName=Self}"
+                                                              EmptyMessage="Select a client on the left to see exactly what would change there."/>
+                                </DockPanel>
                             </Grid>
 
                             <StackPanel Orientation="Horizontal" Margin="0,12,0,0">

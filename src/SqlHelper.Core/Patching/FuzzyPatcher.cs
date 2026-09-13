@@ -5,12 +5,14 @@ namespace SqlHelper.Core.Patching;
 /// <param name="Confidence">How alike the matched block was to the anchor, 0..1.</param>
 /// <param name="MatchLine">1-based line in the target where the matched block starts; -1 when nothing matched.</param>
 /// <param name="Reason">Why it did or didn't match, in words, for the review screen.</param>
+/// <param name="EndLineExclusive">0-based line in the patched text just past the rewritten block; -1 when nothing was applied.</param>
 public sealed record FuzzyPatchResult(
     bool Applied,
     string? PatchedText,
     double Confidence,
     int MatchLine,
-    string Reason);
+    string Reason,
+    int EndLineExclusive = -1);
 
 /// <summary>
 /// Tier 2 of the patch pipeline, for a client whose code around the change has drifted — a
@@ -39,7 +41,12 @@ public static class FuzzyPatcher
     /// <summary>An anchor thinner than this carries too little signal to place confidently.</summary>
     public const int MinimumAnchorCharacters = 12;
 
-    public static FuzzyPatchResult TryApply(string target, string anchor, string replacement)
+    /// <param name="searchFromLine">
+    /// 0-based line the chosen block must not start above, because changes are applied in order.
+    /// Rival blocks are still looked for everywhere: a better-looking candidate above that line is
+    /// a reason to refuse, not something to ignore.
+    /// </param>
+    public static FuzzyPatchResult TryApply(string target, string anchor, string replacement, int searchFromLine = 0)
     {
         ArgumentNullException.ThrowIfNull(target);
         ArgumentNullException.ThrowIfNull(anchor);
@@ -52,46 +59,41 @@ public static class FuzzyPatcher
         }
 
         List<RawLine> targetLines = LineSplitter.Split(target);
-        string[] anchorLines = TrimmedLines(anchor);
+        string[] anchorLines = AnchorMatcher.HunkLines(anchor);
         if (anchorLines.Length == 0 || targetLines.Count == 0)
         {
             return new FuzzyPatchResult(false, null, 0, -1, "Nothing to match against.");
         }
 
-        string[] targetTrimmed = [.. targetLines.Select(l => l.Trimmed)];
-
-        (double Score, int Start, int Length) best = (0, -1, 0);
-        (double Score, int Start, int Length) runnerUp = (0, -1, 0);
+        // Compared by key, so formatting differences cost nothing in the score.
+        string[] anchorKeys = SqlLineKeys.Compute(anchorLines);
+        string[] targetKeys = SqlLineKeys.Compute([.. targetLines.Select(l => l.Text)]);
 
         int minLength = Math.Max(1, anchorLines.Length - WindowFlex);
         int maxLength = anchorLines.Length + WindowFlex;
 
         // Every window is scored against the same anchor over the same lines, so the pair scores
         // are computed once and reused; without this a long anchor makes the search take minutes.
-        var similarity = new LineSimilarityCache(anchorLines, targetTrimmed);
+        var similarity = new LineSimilarityCache(anchorKeys, targetKeys);
+        var candidates = new List<(double Score, int Start, int Length)>();
 
         for (int length = minLength; length <= maxLength; length++)
         {
-            for (int start = 0; start + length <= targetTrimmed.Length; start++)
+            for (int start = 0; start + length <= targetKeys.Length; start++)
             {
                 int windowStart = start;
                 double score = LineSimilarity.AlignBlocks(
-                    anchorLines.Length, length, (i, j) => similarity.Of(i, windowStart + j));
+                    anchorKeys.Length, length, (i, j) => similarity.Of(i, windowStart + j));
+                candidates.Add((score, start, length));
+            }
+        }
 
-                if (score > best.Score)
-                {
-                    // The previous best becomes the rival only if it sits somewhere else entirely.
-                    if (best.Start >= 0 && !Overlaps(best, (score, start, length)))
-                    {
-                        runnerUp = best;
-                    }
-
-                    best = (score, start, length);
-                }
-                else if (score > runnerUp.Score && best.Start >= 0 && !Overlaps(best, (score, start, length)))
-                {
-                    runnerUp = (score, start, length);
-                }
+        (double Score, int Start, int Length) best = (0, -1, 0);
+        foreach (var candidate in candidates)
+        {
+            if (candidate.Start >= searchFromLine && candidate.Score > best.Score)
+            {
+                best = candidate;
             }
         }
 
@@ -100,6 +102,15 @@ public static class FuzzyPatcher
             return new FuzzyPatchResult(false, null, best.Score, -1,
                 $"No block in this object looked like the change (closest was {best.Score:P0} similar, " +
                 $"and {MinimumConfidence:P0} is the minimum).");
+        }
+
+        (double Score, int Start, int Length) runnerUp = (0, -1, 0);
+        foreach (var candidate in candidates)
+        {
+            if (!Overlaps(best, candidate) && candidate.Score > runnerUp.Score)
+            {
+                runnerUp = candidate;
+            }
         }
 
         if (runnerUp.Start >= 0 && runnerUp.Score >= MinimumConfidence && best.Score - runnerUp.Score < UniquenessMargin)
@@ -111,10 +122,12 @@ public static class FuzzyPatcher
 
         string ending = LineSplitter.DominantEnding(target);
 
-        // Merge rather than overwrite: anything this client added inside the matched block is
-        // theirs, and must survive the change.
-        List<RawLine> clientWindow = [.. targetLines.Skip(best.Start).Take(best.Length)];
-        MergeResult merged = ThreeWayLineMerge.Merge(anchorLines, TrimmedLines(replacement), clientWindow, ending);
+        // Merge rather than overwrite: anything this client has inside the matched block that the
+        // change does not touch is theirs, and must survive exactly.
+        List<RawLine> clientWindow = targetLines.GetRange(best.Start, best.Length);
+        MergeResult merged = ThreeWayLineMerge.Merge(
+            anchorLines, AnchorMatcher.HunkLines(replacement), clientWindow,
+            targetKeys[best.Start..(best.Start + best.Length)], ending);
 
         if (!merged.Ok || merged.Merged is null)
         {
@@ -123,9 +136,10 @@ public static class FuzzyPatcher
                 "so the change cannot be applied here without a decision only you can make.");
         }
 
-        string before = LineSplitter.Join(targetLines.Take(best.Start));
-        string after = LineSplitter.Join(targetLines.Skip(best.Start + best.Length));
-        string spliced = EnsureTrailingEnding(merged.Merged, ending, needsTrailingEnding: after.Length > 0);
+        string patched =
+            LineSplitter.Join(targetLines.Take(best.Start)) +
+            LineSplitter.Join(merged.Merged) +
+            LineSplitter.Join(targetLines.Skip(best.Start + best.Length));
 
         string kept = merged.KeptClientLines > 0
             ? $", keeping {merged.KeptClientLines} line(s) this client had added there"
@@ -133,37 +147,13 @@ public static class FuzzyPatcher
 
         return new FuzzyPatchResult(
             true,
-            before + spliced + after,
+            patched,
             best.Score,
             best.Start + 1,
-            $"Matched the block at line {best.Start + 1}, {best.Score:P0} similar{kept}.");
-    }
-
-    /// <summary>Reassembles merged lines, making sure the block ends cleanly against whatever follows it.</summary>
-    private static string EnsureTrailingEnding(IReadOnlyList<RawLine> lines, string ending, bool needsTrailingEnding)
-    {
-        var rebuilt = new List<RawLine>(lines);
-        if (rebuilt.Count > 0)
-        {
-            RawLine last = rebuilt[^1];
-            string lastEnding = needsTrailingEnding || last.Ending.Length > 0 ? ending : string.Empty;
-            rebuilt[^1] = last with { Ending = lastEnding };
-        }
-
-        return LineSplitter.Join(rebuilt);
+            $"Matched the block at line {best.Start + 1}, {best.Score:P0} similar{kept}.",
+            best.Start + merged.Merged.Count);
     }
 
     private static bool Overlaps((double Score, int Start, int Length) a, (double Score, int Start, int Length) b) =>
         a.Start < b.Start + b.Length && b.Start < a.Start + a.Length;
-
-    private static string[] TrimmedLines(string text)
-    {
-        List<RawLine> lines = LineSplitter.Split(text);
-        if (lines.Count > 1 && lines[^1] is { Text.Length: 0, Ending.Length: 0 })
-        {
-            lines.RemoveAt(lines.Count - 1);
-        }
-
-        return [.. lines.Select(l => l.Trimmed)];
-    }
 }

@@ -1,0 +1,69 @@
+<Window x:Class="SqlHelper.App.Views.PatchEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:SqlHelper.App.Controls"
+        xmlns:vm="clr-namespace:SqlHelper.App.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008/design"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance vm:PatchViewModel}"
+        Title="Describe the change" Height="900" Width="1400" WindowState="Maximized"
+        WindowStartupLocation="CenterOwner" Background="{StaticResource SurfaceSunkBrush}">
+    <DockPanel Margin="16">
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+                <Button Content="Work out the change" MinWidth="150" Command="{Binding BuildPatchCommand}"
+                        AutomationProperties.AutomationId="EditorBuildPatch"
+                        ToolTip="Build the patch from these two versions"/>
+                <Button Content="Back to Patch" MinWidth="130" Margin="10,0,0,0" Style="{StaticResource PrimaryButton}"
+                        Click="OnClose" IsCancel="True" AutomationProperties.AutomationId="EditorClose"/>
+            </StackPanel>
+            <StackPanel>
+                <TextBlock Text="Describe the change" Style="{StaticResource PageTitle}"/>
+                <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap">
+                    Paste, type or edit either side. The comparison below follows along as you go. Everything here is the
+                    same text as Step 2 - close this window and it is all still there.
+                </TextBlock>
+            </StackPanel>
+        </DockPanel>
+
+        <TextBlock DockPanel.Dock="Bottom" Text="{Binding StatusMessage}" Style="{StaticResource MutedText}"
+                   TextWrapping="Wrap" Margin="0,8,0,0"/>
+
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" MinHeight="120"/>
+                <RowDefinition Height="8"/>
+                <RowDefinition Height="*" MinHeight="120"/>
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="8"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <DockPanel Grid.Column="0">
+                    <TextBlock DockPanel.Dock="Top" Text="Before — as it is today" Style="{StaticResource FieldLabel}"/>
+                    <TextBox Style="{StaticResource CodeBox}" AutomationProperties.AutomationId="EditorBefore"
+                             Text="{Binding BeforeScript, UpdateSourceTrigger=PropertyChanged}" TextChanged="OnTextChanged"/>
+                </DockPanel>
+
+                <GridSplitter Grid.Column="1" Width="8" HorizontalAlignment="Center" VerticalAlignment="Stretch"
+                              Background="Transparent" ResizeBehavior="PreviousAndNext"/>
+
+                <DockPanel Grid.Column="2">
+                    <TextBlock DockPanel.Dock="Top" Text="After — with your fix" Style="{StaticResource FieldLabel}"/>
+                    <TextBox Style="{StaticResource CodeBox}" AutomationProperties.AutomationId="EditorAfter"
+                             Text="{Binding AfterScript, UpdateSourceTrigger=PropertyChanged}" TextChanged="OnTextChanged"/>
+                </DockPanel>
+            </Grid>
+
+            <GridSplitter Grid.Row="1" Height="8" HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                          Background="Transparent" ResizeBehavior="PreviousAndNext" ResizeDirection="Rows"/>
+
+            <controls:DiffReviewPanel Grid.Row="2" DataContext="{Binding EditorDiff}" ShowExpandButton="False"
+                                      EmptyMessage="Type or paste into both sides to compare them."/>
+        </Grid>
+    </DockPanel>
+</Window>

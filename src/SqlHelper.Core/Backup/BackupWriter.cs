@@ -74,7 +74,7 @@ public sealed class BackupSession
 
         var content = new StringBuilder();
         content.Append(Header(target, module.Name.Plain, TSqlNormalizer.ExactKey(module.Definition), module.ModifiedServerTime));
-        content.Append(ModuleScript.ToRunnableScript(module, forceCreateOrAlter: true));
+        content.Append(ModuleScript.ToRunnableScript(module, ModuleVerb.Alter));
 
         await File.WriteAllTextAsync(path, content.ToString(), new UTF8Encoding(false), cancellationToken).ConfigureAwait(false);
         return path;
@@ -117,7 +117,7 @@ public sealed class BackupSession
         foreach (ProgrammableObject module in previousDefinitions.Where(m => m.HasDefinition))
         {
             content.Append($"-- {module.Name.Plain}\r\n");
-            content.Append(ModuleScript.ToRunnableScript(module, forceCreateOrAlter: true));
+            content.Append(ModuleScript.ToRunnableScript(module, ModuleVerb.Alter));
             content.Append("\r\n");
         }
 

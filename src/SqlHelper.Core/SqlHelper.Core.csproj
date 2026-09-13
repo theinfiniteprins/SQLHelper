@@ -7,6 +7,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The merge and line splitting are internal; their tests exercise them directly. -->
+    <InternalsVisibleTo Include="SqlHelper.Core.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="ClosedXML" Version="0.105.1" />
     <PackageReference Include="DiffPlex" Version="1.9.0" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />

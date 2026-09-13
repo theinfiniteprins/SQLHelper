@@ -1,5 +1,3 @@
-using DiffPlex;
-using DiffPlex.Model;
 using SqlHelper.Core.Scripting;
 
 namespace SqlHelper.Core.Patching;
@@ -72,37 +70,38 @@ public static class PatchDefinitionFactory
                 $"'Before' script is for {before.Name} but 'after' is for {after.Name} — they must be the same object.");
         }
 
-        var differ = new Differ();
-        DiffResult diff = differ.CreateLineDiffs(before.ModuleText, after.ModuleText, ignoreWhitespace: false);
+        string[] oldLines = ModuleLines(before.ModuleText);
+        string[] newLines = ModuleLines(after.ModuleText);
 
-        if (diff.DiffBlocks.Count == 0)
+        IReadOnlyList<LineDiffOp> ops = LineDiff.Compute(oldLines, newLines);
+        List<Block> blocks = ToBlocks(ops);
+
+        if (blocks.Count == 0)
         {
             return PatchDefinitionResult.Failure("The two versions are identical — there is nothing to patch.");
         }
 
-        List<DiffBlock> blocks = [.. diff.DiffBlocks];
-        string[] oldLines = [.. diff.PiecesOld];
-        string[] newLines = [.. diff.PiecesNew];
-
-        // Comparison is by trimmed line, exactly as AnchorMatcher will compare against the client,
-        // so an anchor judged unique here is unique by the same rule that will be applied there.
-        string[] oldTrimmed = [.. oldLines.Select(l => l.Trim())];
+        // Uniqueness is judged by the same keys AnchorMatcher compares with, computed over the whole
+        // reference so multi-line literals and comments are lexed in context.
+        SqlLineKeys.Analysis analysis = SqlLineKeys.Analyse(oldLines);
+        string[] oldKeys = [.. analysis.Keys];
+        IReadOnlyList<bool> startsInCode = analysis.StartsInCode;
 
         List<Region> regions = [.. Enumerable.Range(0, blocks.Count).Select(i => new Region(i, i, Math.Max(0, contextLines)))];
 
         for (int round = 0; round <= MaxGrowthRounds; round++)
         {
-            regions = Merge(regions, blocks, oldLines.Length);
+            regions = Merge(regions, blocks, oldLines.Length, startsInCode);
 
             bool grew = false;
             foreach (Region region in regions)
             {
-                (int start, int end) = region.AnchorRange(blocks, oldLines.Length);
+                (int start, int end) = region.AnchorRange(blocks, oldLines.Length, startsInCode);
 
                 // Measured on the anchor exactly as AnchorMatcher will use it, not on the raw
                 // line range - the two must agree or "unique here" means nothing over there.
                 string[] effective = AnchorMatcher.EffectiveAnchorLines(string.Join('\n', oldLines[start..end]));
-                if (CountOccurrences(oldTrimmed, effective) <= 1)
+                if (CountOccurrences(oldKeys, effective) <= 1)
                 {
                     continue;
                 }
@@ -130,7 +129,7 @@ public static class PatchDefinitionFactory
         var hunks = new List<PatchHunk>(regions.Count);
         foreach (Region region in regions)
         {
-            (int anchorStart, int anchorEnd) = region.AnchorRange(blocks, oldLines.Length);
+            (int anchorStart, int anchorEnd) = region.AnchorRange(blocks, oldLines.Length, startsInCode);
             (int replacementStart, int replacementEnd) = region.ReplacementRange(blocks, anchorStart, anchorEnd, newLines.Length);
 
             string anchor = string.Join('\n', oldLines[anchorStart..anchorEnd]);
@@ -150,7 +149,7 @@ public static class PatchDefinitionFactory
     /// hunk 1 has already rewritten, hunk 2 can no longer find itself and the whole patch is
     /// abandoned. Two changes close enough to share context are really one change.
     /// </summary>
-    private static List<Region> Merge(List<Region> regions, IReadOnlyList<DiffBlock> blocks, int oldLineCount)
+    private static List<Region> Merge(List<Region> regions, IReadOnlyList<Block> blocks, int oldLineCount, IReadOnlyList<bool> startsInCode)
     {
         var merged = new List<Region>(regions.Count);
 
@@ -163,8 +162,8 @@ public static class PatchDefinitionFactory
             }
 
             Region previous = merged[^1];
-            (_, int previousEnd) = previous.AnchorRange(blocks, oldLineCount);
-            (int start, _) = region.AnchorRange(blocks, oldLineCount);
+            (_, int previousEnd) = previous.AnchorRange(blocks, oldLineCount, startsInCode);
+            (int start, _) = region.AnchorRange(blocks, oldLineCount, startsInCode);
 
             if (previousEnd >= start)
             {
@@ -219,12 +218,22 @@ public static class PatchDefinitionFactory
 
         public int Context { get; set; } = context;
 
-        public (int Start, int End) AnchorRange(IReadOnlyList<DiffBlock> blocks, int oldLineCount)
+        /// <remarks>
+        /// The start is moved up, if necessary, until it is a line that begins in ordinary code.
+        /// An anchor that started halfway through a multi-line string or comment would be lexed as
+        /// code when it is matched on its own, and its keys would not mean what they should.
+        /// </remarks>
+        public (int Start, int End) AnchorRange(IReadOnlyList<Block> blocks, int oldLineCount, IReadOnlyList<bool> startsInCode)
         {
-            DiffBlock first = blocks[FirstBlock];
-            DiffBlock last = blocks[LastBlock];
+            Block first = blocks[FirstBlock];
+            Block last = blocks[LastBlock];
 
             int start = Math.Max(0, first.DeleteStartA - Context);
+            while (start > 0 && start < startsInCode.Count && !startsInCode[start])
+            {
+                start--;
+            }
+
             int end = Math.Min(oldLineCount, last.DeleteStartA + last.DeleteCountA + Context);
             return (start, Math.Max(start, end));
         }
@@ -234,10 +243,10 @@ public static class PatchDefinitionFactory
         /// text, so they shift by a fixed amount — whatever the diff inserted or removed before
         /// them at this point.
         /// </summary>
-        public (int Start, int End) ReplacementRange(IReadOnlyList<DiffBlock> blocks, int anchorStart, int anchorEnd, int newLineCount)
+        public (int Start, int End) ReplacementRange(IReadOnlyList<Block> blocks, int anchorStart, int anchorEnd, int newLineCount)
         {
-            DiffBlock first = blocks[FirstBlock];
-            DiffBlock last = blocks[LastBlock];
+            Block first = blocks[FirstBlock];
+            Block last = blocks[LastBlock];
 
             int shiftBefore = first.InsertStartB - first.DeleteStartA;
             int shiftAfter = (last.InsertStartB + last.InsertCountB) - (last.DeleteStartA + last.DeleteCountA);
@@ -247,4 +256,47 @@ public static class PatchDefinitionFactory
             return (start, end);
         }
     }
+
+    /// <summary>One changed region of the diff: lines removed from the old side and lines added on the new.</summary>
+    private readonly record struct Block(int DeleteStartA, int DeleteCountA, int InsertStartB, int InsertCountB);
+
+    private static List<Block> ToBlocks(IReadOnlyList<LineDiffOp> ops)
+    {
+        var blocks = new List<Block>();
+        int i = 0;
+        while (i < ops.Count)
+        {
+            if (ops[i].Kind == LineDiffKind.Equal)
+            {
+                i++;
+                continue;
+            }
+
+            int deleteStart = ops[i].OldStart;
+            int insertStart = ops[i].NewStart;
+            int deleted = 0;
+            int inserted = 0;
+
+            while (i < ops.Count && ops[i].Kind != LineDiffKind.Equal)
+            {
+                if (ops[i].Kind == LineDiffKind.Delete)
+                {
+                    deleted += ops[i].Count;
+                }
+                else
+                {
+                    inserted += ops[i].Count;
+                }
+
+                i++;
+            }
+
+            blocks.Add(new Block(deleteStart, deleted, insertStart, inserted));
+        }
+
+        return blocks;
+    }
+
+    /// <summary>The module's lines, without their endings and without the empty line after a final newline.</summary>
+    private static string[] ModuleLines(string text) => AnchorMatcher.HunkLines(text);
 }

@@ -8,35 +8,49 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008/design" mc:Ignorable="d"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
     <DockPanel>
-        <!-- Toolbar -->
+        <!--
+            The toolbar wraps onto a second line rather than squeezing: in the narrow Step 3 column a
+            single row pushed the full-screen button out of sight.
+        -->
         <Border DockPanel.Dock="Top" Background="{StaticResource SurfaceSunkBrush}"
                 BorderBrush="{StaticResource BorderSoftBrush}" BorderThickness="1,1,1,0"
                 CornerRadius="5,5,0,0" Padding="9,6">
-            <DockPanel>
-                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
-                    <Button Content="◀" Width="30" Padding="0" ToolTip="Previous change (Alt+Up)"
-                            Command="{Binding PreviousChangeCommand}"/>
-                    <Button Content="▶" Width="30" Padding="0" Margin="4,0,0,0" ToolTip="Next change (Alt+Down)"
-                            Command="{Binding NextChangeCommand}"/>
-                    <TextBlock Text="{Binding PositionText}" VerticalAlignment="Center" Margin="10,0,0,0"
-                               Style="{StaticResource MutedText}"/>
-                </StackPanel>
+            <StackPanel>
+                <WrapPanel Orientation="Horizontal">
+                    <StackPanel Orientation="Horizontal" Margin="0,2,16,2">
+                        <Button Content="◀" Width="30" Padding="0" ToolTip="Previous change (Alt+Up)"
+                                AutomationProperties.Name="Previous change"
+                                Command="{Binding PreviousChangeCommand}"/>
+                        <Button Content="▶" Width="30" Padding="0" Margin="4,0,0,0" ToolTip="Next change (Alt+Down)"
+                                AutomationProperties.Name="Next change"
+                                Command="{Binding NextChangeCommand}"/>
+                        <TextBlock Text="{Binding PositionText}" VerticalAlignment="Center" Margin="10,0,0,0"
+                                   Style="{StaticResource MutedText}" MinWidth="86"/>
+                    </StackPanel>
 
-                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
-                    <CheckBox Content="Ignore whitespace" IsChecked="{Binding IgnoreWhitespace}"
-                              VerticalAlignment="Center" FontSize="12"
-                              ToolTip="Treat lines that differ only in spacing or indentation as unchanged"/>
-                    <Button x:Name="ExpandButton" Content="⛶  Full screen" Margin="12,0,0,0" Click="OnExpand"
-                            Visibility="{Binding ShowExpandButton, ElementName=Root, Converter={StaticResource BoolToVisibilityConverter}}"
-                            ToolTip="Open this comparison in a full-screen window"/>
-                </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,2,0,2">
+                        <CheckBox Content="Ignore whitespace" IsChecked="{Binding IgnoreWhitespace}"
+                                  VerticalAlignment="Center" FontSize="12"
+                                  ToolTip="Treat lines that differ only in spacing, tabs or indentation as unchanged. Whitespace inside quotes still counts."/>
+                        <Button x:Name="ExpandButton" Content="{Binding ExpandLabel, ElementName=Root}" Margin="12,0,0,0" Click="OnExpand"
+                                AutomationProperties.Name="Full screen"
+                                Visibility="{Binding ShowExpandButton, ElementName=Root, Converter={StaticResource BoolToVisibilityConverter}}"
+                                ToolTip="Open this in a full-screen window"/>
+                    </StackPanel>
+                </WrapPanel>
 
-                <TextBlock Text="{Binding Stats.Summary}" VerticalAlignment="Center" HorizontalAlignment="Center"
-                           Style="{StaticResource MutedText}" TextTrimming="CharacterEllipsis" Margin="14,0"/>
-            </DockPanel>
+                <TextBlock Text="{Binding Stats.Summary}" Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                           Margin="0,3,0,0" FontSize="12"/>
+            </StackPanel>
         </Border>
 
-        <controls:DiffViewerControl Lines="{Binding Lines}" ScrollToIndex="{Binding ScrollToIndex}"
+        <controls:DiffViewerControl Lines="{Binding Lines}"
+                                    ScrollRequest="{Binding ScrollRequest}"
+                                    CurrentChange="{Binding CurrentChange}"
+                                    TopVisibleLine="{Binding TopVisibleLine, Mode=TwoWay}"
+                                    BottomVisibleLine="{Binding BottomVisibleLine, Mode=TwoWay}"
+                                    BeforeText="{Binding BeforeText}"
+                                    AfterText="{Binding AfterText}"
                                     EmptyMessage="{Binding EmptyMessage, ElementName=Root}"/>
     </DockPanel>
 </UserControl>

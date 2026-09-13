@@ -56,7 +56,8 @@
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
-                                        <CheckBox Grid.Column="0" IsChecked="{Binding IsSelected}" VerticalAlignment="Center"/>
+                                        <CheckBox Grid.Column="0" IsChecked="{Binding IsSelected}" VerticalAlignment="Center"
+                                                  AutomationProperties.Name="{Binding Target.QualifiedName}"/>
                                         <StackPanel Grid.Column="1" Margin="9,0,6,0">
                                             <TextBlock Text="{Binding Target.ClientName}" FontWeight="Medium"
                                                        TextTrimming="CharacterEllipsis"/>

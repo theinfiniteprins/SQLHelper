@@ -46,9 +46,11 @@ public sealed record PatchAttempt(
 }
 
 /// <summary>
-/// Runs one target through the patch pipeline: try every hunk at the exact tier; if any hunk
-/// fails, retry the whole set at the fuzzy tier; if that still fails, or validation rejects the
-/// result, the target is left untouched and flagged for a manual edit. Hunks are never applied
+/// Runs one target through the patch pipeline. Hunks are applied in order; each is tried at the
+/// exact tier first and, only if that cannot place it, at the tolerant tier. Each hunk must land
+/// below the one before it — they come from one diff of one procedure, so they cannot legitimately
+/// appear in a different order. If any hunk cannot be placed, or validation rejects the result,
+/// the target is left untouched and flagged for a manual edit. Hunks are never applied
 /// partially — a target either gets every hunk or none of them.
 /// </summary>
 public static class PatchPlanner
@@ -67,24 +69,8 @@ public static class PatchPlanner
                 "Already has this change.");
         }
 
-        AttemptRun exact = RunTier(original, patch, PatchTier.ExactAnchor);
-        AttemptRun chosen = exact;
-        bool usedFuzzy = false;
-
-        if (!exact.AllApplied)
-        {
-            AttemptRun fuzzy = RunTier(original, patch, PatchTier.FuzzyAnchor);
-            if (fuzzy.AllApplied)
-            {
-                chosen = fuzzy;
-                usedFuzzy = true;
-            }
-            else
-            {
-                // Prefer showing whichever tier got further, for diagnostics.
-                chosen = fuzzy.Attempts.Count(a => a.Applied) >= exact.Attempts.Count(a => a.Applied) ? fuzzy : exact;
-            }
-        }
+        AttemptRun chosen = RunInOrder(original, patch);
+        bool usedFuzzy = chosen.Attempts.Any(a => a.Applied && a.Tier == PatchTier.FuzzyAnchor);
 
         if (!chosen.AllApplied || chosen.FinalText is null)
         {
@@ -133,11 +119,11 @@ public static class PatchPlanner
 
     private static bool ContainsNormalized(string haystack, string needle)
     {
-        static string[] Lines(string s) => s.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n')
-            .Select(l => l.Trim()).Where(l => l.Length > 0).ToArray();
+        // Compared by key, over the whole haystack so its literals and comments are lexed in context.
+        static string[] NonBlank(IEnumerable<string> keys) => [.. keys.Where(k => k.Length > 0)];
 
-        string[] hay = Lines(haystack);
-        string[] pin = Lines(needle);
+        string[] hay = NonBlank(SqlLineKeys.Compute([.. LineSplitter.Split(haystack).Select(l => l.Text)]));
+        string[] pin = NonBlank(AnchorMatcher.EffectiveAnchorLines(needle));
         if (pin.Length == 0)
         {
             return true;
@@ -148,7 +134,7 @@ public static class PatchPlanner
             bool match = true;
             for (int j = 0; j < pin.Length; j++)
             {
-                if (hay[i + j] != pin[j])
+                if (!string.Equals(hay[i + j], pin[j], StringComparison.Ordinal))
                 {
                     match = false;
                     break;
@@ -164,53 +150,51 @@ public static class PatchPlanner
         return false;
     }
 
-    private static AttemptRun RunTier(string original, PatchDefinition patch, PatchTier tier)
+    private static AttemptRun RunInOrder(string original, PatchDefinition patch)
     {
         string working = original;
         var attempts = new List<HunkAttempt>();
-        bool allApplied = true;
+        int searchFrom = 0;
 
         for (int i = 0; i < patch.Hunks.Count; i++)
         {
             PatchHunk hunk = patch.Hunks[i];
 
-            if (tier == PatchTier.ExactAnchor)
+            AnchorMatchResult exact = AnchorMatcher.TryApply(working, hunk.AnchorText, hunk.ReplacementText, searchFrom);
+            if (exact.IsUnique && exact.PatchedText is not null)
             {
-                AnchorMatchResult result = AnchorMatcher.TryApply(working, hunk.AnchorText, hunk.ReplacementText);
-                if (result.IsUnique && result.PatchedText is not null)
-                {
-                    working = result.PatchedText;
-                    attempts.Add(new HunkAttempt(i, tier, true, result.FirstMatchLine, "Exact match."));
-                }
-                else
-                {
-                    allApplied = false;
-                    attempts.Add(new HunkAttempt(i, tier, false, -1, Describe(result)));
-                }
+                working = exact.PatchedText;
+                searchFrom = exact.EndLineExclusive;
+                attempts.Add(new HunkAttempt(i, PatchTier.ExactAnchor, true, exact.FirstMatchLine, "Exact match."));
+                continue;
             }
-            else
+
+            FuzzyPatchResult fuzzy = FuzzyPatcher.TryApply(working, hunk.AnchorText, hunk.ReplacementText, searchFrom);
+            if (fuzzy.Applied && fuzzy.PatchedText is not null)
             {
-                FuzzyPatchResult result = FuzzyPatcher.TryApply(working, hunk.AnchorText, hunk.ReplacementText);
-                if (result.Applied && result.PatchedText is not null)
-                {
-                    working = result.PatchedText;
-                    attempts.Add(new HunkAttempt(i, tier, true, result.MatchLine, result.Reason));
-                }
-                else
-                {
-                    allApplied = false;
-                    attempts.Add(new HunkAttempt(i, tier, false, result.MatchLine, result.Reason));
-                }
+                working = fuzzy.PatchedText;
+                searchFrom = fuzzy.EndLineExclusive;
+                attempts.Add(new HunkAttempt(i, PatchTier.FuzzyAnchor, true, fuzzy.MatchLine, fuzzy.Reason));
+                continue;
             }
+
+            // Say why the exact tier could not place it when that is the more useful explanation.
+            string detail = exact.Status is AnchorMatchStatus.Ambiguous or AnchorMatchStatus.OutOfOrder
+                ? $"{Describe(exact)} {fuzzy.Reason}"
+                : fuzzy.Reason;
+
+            attempts.Add(new HunkAttempt(i, PatchTier.FuzzyAnchor, false, fuzzy.MatchLine, detail));
+            return new AttemptRun(false, null, attempts);
         }
 
-        return new AttemptRun(allApplied, allApplied ? working : null, attempts);
+        return new AttemptRun(true, working, attempts);
     }
 
     private static string Describe(AnchorMatchResult result) => result.Status switch
     {
         AnchorMatchStatus.NotFound => "Anchor text not found.",
-        AnchorMatchStatus.Ambiguous => $"Anchor text matched {result.MatchCount} places — not unique.",
+        AnchorMatchStatus.Ambiguous => $"The surrounding lines match {result.MatchCount} places in this object.",
+        AnchorMatchStatus.OutOfOrder => $"It matched at line {result.FirstMatchLine}, above a change already placed further down.",
         _ => "No match.",
     };
 
